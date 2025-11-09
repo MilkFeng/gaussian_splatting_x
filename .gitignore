@@ -1,0 +1,7 @@
+Binaries/
+Intermediate/
+Saved/
+.vs/
+*.VC.db
+*.sln
+*.uproject
