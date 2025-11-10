@@ -10,6 +10,8 @@ public class GaussianSplattingXRuntime : ModuleRules
             new string[]
             {
                 "Core",
+                "Niagara",
+                "NiagaraCore",
             }
         );
 
@@ -19,7 +21,7 @@ public class GaussianSplattingXRuntime : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "Slate",
-                "SlateCore"
+                "SlateCore",
             }
         );
     }

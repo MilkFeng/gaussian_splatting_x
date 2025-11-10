@@ -11,6 +11,7 @@ public class GaussianSplattingXImporter : ModuleRules
 			new string[]
 			{
 				"Core",
+				"GaussianSplattingXRuntime",
 			}
 		);
 

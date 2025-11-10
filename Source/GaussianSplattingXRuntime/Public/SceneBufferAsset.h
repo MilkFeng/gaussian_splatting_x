@@ -1,10 +1,11 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+
 #include "SceneBufferAsset.generated.h"
 
 USTRUCT(BlueprintType)
-struct FGaussian
+struct GAUSSIANSPLATTINGXRUNTIME_API FGaussian
 {
 	GENERATED_BODY()
 
@@ -15,7 +16,7 @@ struct FGaussian
 	FVector Scale = {};
 
 	UPROPERTY()
-	FQuat4f Rotation = {};
+	FQuat Rotation = {};
 
 	UPROPERTY()
 	uint32 SHDim = {};
@@ -31,7 +32,7 @@ struct FGaussian
 };
 
 UCLASS(BlueprintType)
-class USceneBufferAsset : public UObject
+class GAUSSIANSPLATTINGXRUNTIME_API USceneBufferAsset : public UObject
 {
 	GENERATED_BODY()
 

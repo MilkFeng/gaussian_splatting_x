@@ -22,7 +22,13 @@ void FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(float)
 
 	OnProgress(0.1f);
 	UE_LOG(LogTemp, Log, TEXT("Reading PLY file: %s"), *FilePath);
-	ReadScene(FilePath, *SceneBufferAsset, OnProgress);
+	const bool Success = ReadScene(FilePath, *SceneBufferAsset, OnProgress);
+
+	if (!Success)
+	{
+		OnProgress(1.0f);
+		return;
+	}
 
 	OnProgress(0.9f);
 	UE_LOG(LogTemp, Log, TEXT("Saving asset to package: %s"), *PackageFilename);
@@ -38,7 +44,7 @@ void FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(float)
 	OnProgress(1.0f);
 }
 
-void FSceneManager::ReadScene(const FString& FilePath, USceneBufferAsset& Scene, TFunction<void(float)> OnProgress)
+bool FSceneManager::ReadScene(const FString& FilePath, USceneBufferAsset& Scene, TFunction<void(float)> OnProgress)
 {
 	try
 	{
@@ -91,7 +97,7 @@ void FSceneManager::ReadScene(const FString& FilePath, USceneBufferAsset& Scene,
 			Gaussian.Position = FVector{VertexData[0], VertexData[1], VertexData[2]};
 			Gaussian.Opacity = VertexData[3];
 			Gaussian.Scale = FVector{VertexData[4], VertexData[5], VertexData[6]};
-			Gaussian.Rotation = FQuat4f{VertexData[7], VertexData[8], VertexData[9], VertexData[10]};
+			Gaussian.Rotation = FQuat{VertexData[7], VertexData[8], VertexData[9], VertexData[10]};
 			Gaussian.SHDim = Scene.SHDim;
 			Gaussian.SHCoefficientsCount = Scene.SHCoefficientsCount;
 			Gaussian.SHCoefficients.SetNumZeroed(Gaussian.SHCoefficientsCount);
@@ -125,5 +131,8 @@ void FSceneManager::ReadScene(const FString& FilePath, USceneBufferAsset& Scene,
 	catch (const std::exception& e)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Failed to read PLY file: %s"), *FString(e.what()));
+		return false;
 	}
+
+	return true;
 }
