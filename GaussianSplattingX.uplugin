@@ -1,29 +1,34 @@
 {
-  "FileVersion": 3,
-  "Version": 1,
-  "VersionName": "1.0",
-  "FriendlyName": "GaussianSplattingX",
-  "Description": "A renderer plugin for gaussian splatting",
-  "Category": "Other",
-  "CreatedBy": "MilkFeng",
-  "CreatedByURL": "",
-  "DocsURL": "",
-  "MarketplaceURL": "",
-  "SupportURL": "",
-  "CanContainContent": false,
-  "IsBetaVersion": true,
-  "IsExperimentalVersion": false,
-  "Installed": false,
-  "Modules": [
-    {
-      "Name": "GaussianSplattingXEditor",
-      "Type": "Editor",
-      "LoadingPhase": "Default"
-    },
-    {
-      "Name": "GaussianSplattingXImporter",
-      "Type": "Editor",
-      "LoadingPhase": "PostEngineInit"
-    }
-  ]
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "GaussianSplattingX",
+	"Description": "A renderer plugin for gaussian splatting",
+	"Category": "Other",
+	"CreatedBy": "MilkFeng",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "GaussianSplattingXEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "GaussianSplattingXImporter",
+			"Type": "Developer",
+			"LoadingPhase": "PostEngineInit"
+		},
+		{
+			"Name": "GaussianSplattingXRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
 }

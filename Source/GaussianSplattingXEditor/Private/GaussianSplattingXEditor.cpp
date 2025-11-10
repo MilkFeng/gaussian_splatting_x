@@ -9,7 +9,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "ToolMenus.h"
-#include "GaussianSplattingXImporter/Public/PLYManager.h"
+#include "GaussianSplattingXImporter/Public/SceneManager.h"
 
 static const FName GaussianSplattingXTabName("GaussianSplattingX");
 
@@ -58,7 +58,6 @@ void FGaussianSplattingXEditorModule::ShutdownModule()
 
 TSharedRef<SDockTab> FGaussianSplattingXEditorModule::OnSpawnPluginTab(const FSpawnTabArgs& SpawnTabArgs)
 {
-	// 添加一个加载 .ply 文件的按钮
 	return SNew(SDockTab)
 		.TabRole(ETabRole::NomadTab)
 		[
@@ -80,7 +79,7 @@ TSharedRef<SDockTab> FGaussianSplattingXEditorModule::OnSpawnPluginTab(const FSp
 					TArray<FString> OutFiles;
 					const bool bOpened = DesktopPlatform->OpenFileDialog(
 						ParentWindowHandle,
-						TEXT("选择一个文件"),
+						TEXT("Select .ply file to import"),
 						FPaths::ProjectContentDir(),
 						TEXT(""),
 						TEXT("*.ply"),
@@ -93,7 +92,14 @@ TSharedRef<SDockTab> FGaussianSplattingXEditorModule::OnSpawnPluginTab(const FSp
 						return FReply::Handled();
 					}
 
-					FPlyManager::ImportPlyFile(OutFiles[0]);
+					FScopedSlowTask SlowTask(100.f, FText::FromString("Importing .ply file..."));
+					SlowTask.MakeDialog();
+
+					FSceneManager::ImportPlyFile(OutFiles[0], [&SlowTask](const float Progress)
+					{
+						SlowTask.EnterProgressFrame(Progress * 100.f - SlowTask.CompletedWork);
+					});
+
 					return FReply::Handled();
 				}))
 			]
