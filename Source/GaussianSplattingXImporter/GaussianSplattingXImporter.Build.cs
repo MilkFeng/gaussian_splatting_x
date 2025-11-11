@@ -12,6 +12,7 @@ public class GaussianSplattingXImporter : ModuleRules
 			{
 				"Core",
 				"GaussianSplattingXRuntime",
+				
 			}
 		);
 
@@ -20,6 +21,8 @@ public class GaussianSplattingXImporter : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
+				"UnrealEd",
+				"Kismet",
 			}
 		);
 

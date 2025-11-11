@@ -28,7 +28,7 @@ void USceneNiagaraInterface::GetVMExternalFunction(const FVMExternalFunctionBind
 	}
 }
 
-void USceneNiagaraInterface::GetGaussianCount(FVectorVMExternalFunctionContextProxy& Context)
+void USceneNiagaraInterface::GetGaussianCount(FVectorVMExternalFunctionContextProxy& Context) const
 {
 	VectorVM::FExternalFuncRegisterHandler<int32> OutCount(Context);
 
@@ -39,7 +39,7 @@ void USceneNiagaraInterface::GetGaussianCount(FVectorVMExternalFunctionContextPr
 	}
 }
 
-void USceneNiagaraInterface::GetGaussianData(FVectorVMExternalFunctionContextProxy& Context)
+void USceneNiagaraInterface::GetGaussianData(FVectorVMExternalFunctionContextProxy& Context) const
 {
 	VectorVM::FExternalFuncInputHandler<int32> IndexParam(Context);
 	VectorVM::FExternalFuncRegisterHandler<FVector> OutPosition(Context);

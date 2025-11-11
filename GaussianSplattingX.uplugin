@@ -23,7 +23,7 @@
     {
       "Name": "GaussianSplattingXImporter",
       "Type": "Developer",
-      "LoadingPhase": "PostEngineInit"
+      "LoadingPhase": "Default"
     },
     {
       "Name": "GaussianSplattingXRuntime",

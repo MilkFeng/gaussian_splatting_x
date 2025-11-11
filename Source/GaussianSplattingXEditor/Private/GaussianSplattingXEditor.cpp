@@ -95,7 +95,7 @@ TSharedRef<SDockTab> FGaussianSplattingXEditorModule::OnSpawnPluginTab(const FSp
 					FScopedSlowTask SlowTask(100.f, FText::FromString("Importing .ply file..."));
 					SlowTask.MakeDialog();
 
-					FSceneManager::ImportPlyFile(OutFiles[0], [&SlowTask](const float Progress)
+					FSceneManager::ImportScene(OutFiles[0], [&SlowTask](const float Progress)
 					{
 						SlowTask.EnterProgressFrame(Progress * 100.f - SlowTask.CompletedWork);
 					});

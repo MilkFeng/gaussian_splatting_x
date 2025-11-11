@@ -3,11 +3,31 @@
 #include <format>
 #include <fstream>
 
+#include "SceneActor.h"
 #include "tinyply.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "UObject/SavePackage.h"
 
-void FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(float)> OnProgress)
+void FSceneManager::ImportScene(const FString& FilePath, TFunction<void(float)> OnProgress)
+{
+	OnProgress(0.0f);
+	UE_LOG(LogTemp, Log, TEXT("Importing PLY file: %s"), *FilePath);
+	const FString SceneBufferAssetPath = ImportPlyFile(FilePath,
+	                                                   [&OnProgress](const float Progress)
+	                                                   {
+		                                                   OnProgress(Progress * 0.8f);
+	                                                   });
+
+	OnProgress(0.8f);
+	UE_LOG(LogTemp, Log, TEXT("Creating new Scene Actor to Content Browser"));
+	CreateActorInContentBrowser(SceneBufferAssetPath);
+
+	OnProgress(1.0f);
+	UE_LOG(LogTemp, Log, TEXT("Import process completed."));
+}
+
+FString FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(float)> OnProgress)
 {
 	OnProgress(0.0f);
 	UE_LOG(LogTemp, Log, TEXT("Starting import of PLY file: %s"), *FilePath);
@@ -22,12 +42,16 @@ void FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(float)
 
 	OnProgress(0.1f);
 	UE_LOG(LogTemp, Log, TEXT("Reading PLY file: %s"), *FilePath);
-	const bool Success = ReadScene(FilePath, *SceneBufferAsset, OnProgress);
+	const bool Success = ReadPlyFile(FilePath, *SceneBufferAsset,
+	                                 [&OnProgress](const float Progress)
+	                                 {
+		                                 OnProgress(0.1f + Progress * 0.8f);
+	                                 });
 
 	if (!Success)
 	{
 		OnProgress(1.0f);
-		return;
+		return "";
 	}
 
 	OnProgress(0.9f);
@@ -42,9 +66,12 @@ void FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(float)
 
 	UE_LOG(LogTemp, Log, TEXT("PLY import completed successfully."));
 	OnProgress(1.0f);
+
+	// 返回 Buffer 的引用路径
+	return PackageName + TEXT(".") + Name;
 }
 
-bool FSceneManager::ReadScene(const FString& FilePath, USceneBufferAsset& Scene, TFunction<void(float)> OnProgress)
+bool FSceneManager::ReadPlyFile(const FString& FilePath, USceneBufferAsset& Scene, TFunction<void(float)> OnProgress)
 {
 	try
 	{
@@ -109,7 +136,7 @@ bool FSceneManager::ReadScene(const FString& FilePath, USceneBufferAsset& Scene,
 				}
 			}
 
-			OnProgress(static_cast<float>(i + 1) / static_cast<float>(Vertices->count) * 0.8f + 0.1f);
+			OnProgress(static_cast<float>(i + 1) / static_cast<float>(Vertices->count));
 
 			UE_LOG(LogTemp, Verbose,
 			       TEXT(
@@ -135,4 +162,42 @@ bool FSceneManager::ReadScene(const FString& FilePath, USceneBufferAsset& Scene,
 	}
 
 	return true;
+}
+
+void FSceneManager::CreateActorInContentBrowser(const FString& SceneBufferAssetPath)
+{
+	const FString Name = FPaths::GetBaseFilename(SceneBufferAssetPath) + TEXT("_Actor");
+	const FString PackageName = FString::Format(TEXT("/Game/GaussianSplattingX/{0}"), {Name});
+	const FString PackageFilename = FPackageName::LongPackageNameToFilename(
+		PackageName, FPackageName::GetAssetPackageExtension());
+
+	UPackage* Package = CreatePackage(*PackageName);
+
+	// 创建一个蓝图，基类是 ASceneActor，这样可以保存成一个正常的资产
+	UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(
+		ASceneActor::StaticClass(), // 基类
+		CreatePackage(*PackageName),
+		*Name,
+		EBlueprintType::BPTYPE_Normal,
+		UBlueprint::StaticClass(),
+		UBlueprintGeneratedClass::StaticClass()
+	);
+
+	// 为蓝图基类中的属性赋值
+	ASceneActor* SceneActor = Blueprint->GeneratedClass->GetDefaultObject<ASceneActor>();
+	SceneActor->SceneNiagaraInterface = NewObject<USceneNiagaraInterface>(SceneActor);
+	SceneActor->SceneNiagaraInterface->SceneBufferAsset = TSoftObjectPtr<USceneBufferAsset>(
+		FSoftObjectPath(SceneBufferAssetPath));
+
+	// 注册资产
+	FAssetRegistryModule::AssetCreated(Blueprint);
+	[[maybe_unused]] bool Suppressed = Package->MarkPackageDirty();
+
+	// 保存资产到包
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
+
+	UPackage::SavePackage(Package, SceneActor, *PackageFilename, SaveArgs);
+	UE_LOG(LogTemp, Log, TEXT("Created Scene Actor asset at: %s"), *PackageFilename);
 }

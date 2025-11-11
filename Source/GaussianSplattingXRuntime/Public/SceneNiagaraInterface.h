@@ -12,13 +12,13 @@ class GAUSSIANSPLATTINGXRUNTIME_API USceneNiagaraInterface : public UNiagaraData
 
 public:
 	UPROPERTY()
-	TObjectPtr<USceneBufferAsset> SceneBufferAsset;
+	TSoftObjectPtr<USceneBufferAsset> SceneBufferAsset;
 
 	virtual void GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const override;
 	virtual void GetVMExternalFunction(const FVMExternalFunctionBindingInfo& BindingInfo,
 	                                   void* InstanceData, FVMExternalFunction& OutFunc) override;
 
 private:
-	void GetGaussianCount(FVectorVMExternalFunctionContextProxy& Context);
-	void GetGaussianData(FVectorVMExternalFunctionContextProxy& Context);
+	void GetGaussianCount(FVectorVMExternalFunctionContextProxy& Context) const;
+	void GetGaussianData(FVectorVMExternalFunctionContextProxy& Context) const;
 };
