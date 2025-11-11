@@ -11,14 +11,17 @@
 
 void FSceneManager::ImportScene(const FString& FilePath, TFunction<void(float)> OnProgress)
 {
+	// 读取 .ply 文件，创建 SceneBufferAsset 资产
 	OnProgress(0.0f);
 	UE_LOG(LogTemp, Log, TEXT("Importing PLY file: %s"), *FilePath);
 	const FString SceneBufferAssetPath = ImportPlyFile(FilePath,
 	                                                   [&OnProgress](const float Progress)
 	                                                   {
+		                                                   // 进度映射到 0.0 - 0.8
 		                                                   OnProgress(Progress * 0.8f);
 	                                                   });
 
+	// 创建一个 Scene Actor 蓝图资产引用它
 	OnProgress(0.8f);
 	UE_LOG(LogTemp, Log, TEXT("Creating new Scene Actor to Content Browser"));
 	CreateActorInContentBrowser(SceneBufferAssetPath);
@@ -29,6 +32,7 @@ void FSceneManager::ImportScene(const FString& FilePath, TFunction<void(float)> 
 
 FString FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(float)> OnProgress)
 {
+	// 创建一个新的包和 SceneBufferAsset 资产
 	OnProgress(0.0f);
 	UE_LOG(LogTemp, Log, TEXT("Starting import of PLY file: %s"), *FilePath);
 	const FString Name = FPaths::GetBaseFilename(FilePath);
@@ -40,6 +44,7 @@ FString FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(flo
 	USceneBufferAsset* SceneBufferAsset = NewObject<USceneBufferAsset>(Package, USceneBufferAsset::StaticClass(), *Name,
 	                                                                   RF_Public | RF_Standalone);
 
+	// 读取 PLY 文件并填充数据
 	OnProgress(0.1f);
 	UE_LOG(LogTemp, Log, TEXT("Reading PLY file: %s"), *FilePath);
 	const bool Success = ReadPlyFile(FilePath, *SceneBufferAsset,
@@ -54,6 +59,7 @@ FString FSceneManager::ImportPlyFile(const FString& FilePath, TFunction<void(flo
 		return "";
 	}
 
+	// 保存资产到包中
 	OnProgress(0.9f);
 	UE_LOG(LogTemp, Log, TEXT("Saving asset to package: %s"), *PackageFilename);
 
@@ -78,6 +84,7 @@ bool FSceneManager::ReadPlyFile(const FString& FilePath, USceneBufferAsset& Scen
 		const std::string StdFilePath = std::string(TCHAR_TO_UTF8(*FilePath));
 		std::ifstream FileStream(StdFilePath, std::ios::binary);
 
+		// 解析 PLY 头，获取顶点数量和属性
 		tinyply::PlyFile File;
 		File.parse_header(FileStream);
 
@@ -112,6 +119,7 @@ bool FSceneManager::ReadPlyFile(const FString& FilePath, USceneBufferAsset& Scen
 		const std::shared_ptr<tinyply::PlyData> Vertices = File.request_properties_from_element(
 			"vertex", PropertyKeys);
 
+		// 读取所有的顶点
 		File.read(FileStream);
 
 		Scene.Gaussians.SetNum(Vertices->count);
