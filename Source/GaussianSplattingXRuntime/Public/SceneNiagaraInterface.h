@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿//! 参考实例： https://github.com/EpicGames/UnrealEngine/tree/release/Engine/Plugins/FX/ExampleCustomDataInterface
+
+#pragma once
 
 #include "NiagaraDataInterface.h"
 #include "SceneBufferAsset.h"
@@ -12,21 +14,42 @@ class GAUSSIANSPLATTINGXRUNTIME_API USceneNiagaraInterface : public UNiagaraData
 {
 	GENERATED_BODY()
 
+	BEGIN_SHADER_PARAMETER_STRUCT(FShaderParameters,)
+		SHADER_PARAMETER(int32, GaussianCount)
+	END_SHADER_PARAMETER_STRUCT()
+
 public:
 	UPROPERTY()
 	TSoftObjectPtr<USceneBufferAsset> SceneBufferAsset;
 
-	/// 注册 Niagara 可以调用的函数
-	virtual void GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const override;
+	/// 在对象被构造完毕并初始化其 UProperty（反射属性）后调用，CDO（Class Default Object）也会调用
+	virtual void PostInitProperties() override;
 
-	/// 绑定具体的实现函数
+#if WITH_EDITORONLY_DATA
+	virtual bool AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const override;
+	virtual bool GetFunctionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
+	                             const FNiagaraDataInterfaceGeneratedFunction& FunctionInfo, int FunctionInstanceIndex,
+	                             FString& OutHLSL) override;
+	virtual void
+	GetParameterDefinitionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo, FString& OutHLSL) override;
+#endif
+	virtual void BuildShaderParameters(FNiagaraShaderParametersBuilder& ShaderParametersBuilder) const override;
+	virtual void SetShaderParameters(const FNiagaraDataInterfaceSetShaderParametersContext& Context) const override;
+
 	virtual void GetVMExternalFunction(const FVMExternalFunctionBindingInfo& BindingInfo,
 	                                   void* InstanceData, FVMExternalFunction& OutFunc) override;
 
-private:
-	/// 获取场景中高斯数量
-	void GetGaussianCount(FVectorVMExternalFunctionContextProxy& Context) const;
+protected:
+#if WITH_EDITORONLY_DATA
+	virtual void GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const override;
+#endif
 
-	/// 获取指定的高斯
+private:
+	void GetGaussianCount(FVectorVMExternalFunctionContextProxy& Context) const;
 	void GetGaussianData(FVectorVMExternalFunctionContextProxy& Context) const;
+
+private:
+	static const FName GetGaussianCountName;
+	static const FName GetGaussianDataName;
+	static const FString GetGaussianCountShaderFile;
 };
