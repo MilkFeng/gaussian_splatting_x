@@ -13,7 +13,9 @@ public class GaussianSplattingXRuntime : ModuleRules
 				"Niagara",
 				"NiagaraCore",
 				"VectorVM",
-				"RenderCore"
+				"RenderCore",
+				"Projects",
+				"RHI"
 			}
 		);
 
@@ -24,5 +26,10 @@ public class GaussianSplattingXRuntime : ModuleRules
 				"Engine",
 			}
 		);
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("UnrealEd");
+		}
 	}
 }

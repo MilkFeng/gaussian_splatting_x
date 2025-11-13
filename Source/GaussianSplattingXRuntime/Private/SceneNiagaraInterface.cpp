@@ -2,6 +2,7 @@
 
 #include "NiagaraCompileHashVisitor.h"
 #include "NiagaraShaderParametersBuilder.h"
+#include "NiagaraSystemInstance.h"
 
 const FName USceneNiagaraInterface::GetGaussianCountName = TEXT("GetGaussianCount");
 const FName USceneNiagaraInterface::GetGaussianDataName = TEXT("GetGaussianData");
@@ -49,6 +50,37 @@ struct FNDIGaussianCountProxy : public FNiagaraDataInterfaceProxy
 	TMap<FNiagaraSystemInstanceID, FNDIGaussianCountInstanceData> SystemInstancesToInstanceData_RT;
 };
 
+USceneNiagaraInterface::USceneNiagaraInterface(FObjectInitializer const& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	Proxy.Reset(new FNDIGaussianCountProxy());
+}
+
+#if WITH_EDITORONLY_DATA
+void USceneNiagaraInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const
+{
+	FNiagaraFunctionSignature CountSig;
+	CountSig.Name = GetGaussianCountName;
+	CountSig.bMemberFunction = true;
+	CountSig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("Scene Interface")));
+	CountSig.AddOutput(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Count")));
+	OutFunctions.Add(CountSig);
+
+	// FNiagaraFunctionSignature DataSig;
+	// DataSig.Name = GetGaussianDataName;
+	// CountSig.bMemberFunction = true;
+	// DataSig.Inputs.Add(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("SceneNiagaraInterface")));
+	// DataSig.Inputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Index")));
+	// DataSig.Outputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(), TEXT("Position")));
+	// DataSig.Outputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(), TEXT("Scale")));
+	// OutFunctions.Add(DataSig);
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("USceneNiagaraInterface::GetFunctionsInternal - Registered %d functions."),
+	       OutFunctions.Num());
+}
+#endif
+
 void USceneNiagaraInterface::PostInitProperties()
 {
 	Super::PostInitProperties();
@@ -71,6 +103,32 @@ void USceneNiagaraInterface::PostInitProperties()
 		// 一定得注册才能在 Niagara 系统的用户参数部分使用它
 		FNiagaraTypeRegistry::Register(FNiagaraTypeDefinition(GetClass()), Flags);
 	}
+}
+
+void USceneNiagaraInterface::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	const USceneBufferAsset* Asset = SceneBufferAsset.LoadSynchronous();
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("PostEditChangeProperty - Loaded SceneBufferAsset, Count=%d, SceneBufferAsset is nullptr:%d"),
+	       Asset ? Asset->Gaussians.Num() : 0, (SceneBufferAsset == nullptr));
+}
+
+bool USceneNiagaraInterface::Equals(const UNiagaraDataInterface* Other) const
+{
+	if (!Super::Equals(Other))
+	{
+		return false;
+	}
+
+	return SceneBufferAsset == CastChecked<USceneNiagaraInterface>(Other)->SceneBufferAsset;
+}
+
+bool USceneNiagaraInterface::CanExecuteOnTarget(ENiagaraSimTarget Target) const
+{
+	return true;
 }
 
 bool USceneNiagaraInterface::AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const
@@ -113,7 +171,76 @@ void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetS
 		Context.GetSystemInstanceID());
 
 	FShaderParameters* ShaderParameters = Context.GetParameterNestedStruct<FShaderParameters>();
+
 	ShaderParameters->GaussianCount = InstanceData.GaussianCount;
+	UE_LOG(LogTemp, Log,
+	       TEXT("USceneNiagaraInterface::SetShaderParameters - Set GaussianCount to %d for SystemInstanceID %llu"),
+	       ShaderParameters->GaussianCount,
+	       Context.GetSystemInstanceID());
+}
+
+int USceneNiagaraInterface::PerInstanceDataSize() const
+{
+	return sizeof(FNDIGaussianCountInstanceData);
+}
+
+bool USceneNiagaraInterface::InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
+{
+	FNDIGaussianCountInstanceData* InstanceData = new(PerInstanceData) FNDIGaussianCountInstanceData();
+
+	const USceneBufferAsset* Asset = SceneBufferAsset.LoadSynchronous();
+	InstanceData->GaussianCount = Asset ? Asset->Gaussians.Num() : 0;
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("InitPerInstanceData - Loaded SceneBufferAsset, Count=%d"),
+	       InstanceData->GaussianCount);
+
+	return true;
+}
+
+bool USceneNiagaraInterface::PerInstanceTick(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance,
+                                             const float DeltaSeconds)
+{
+	check(SystemInstance);
+	FNDIGaussianCountInstanceData* InstanceData = static_cast<FNDIGaussianCountInstanceData*>(PerInstanceData);
+
+	if (!InstanceData)
+	{
+		return true;
+	}
+
+	InstanceData->GaussianCount = SceneBufferAsset ? SceneBufferAsset->Gaussians.Num() : 0;
+	UE_LOG(LogTemp, Log,
+	       TEXT("USceneNiagaraInterface::PerInstanceTick - Updated GaussianCount to %d for SystemInstanceID %llu"),
+	       InstanceData->GaussianCount,
+	       SystemInstance->GetId());
+	return false;
+}
+
+void USceneNiagaraInterface::ProvidePerInstanceDataForRenderThread(void* DataForRenderThread, void* PerInstanceData,
+                                                                   const FNiagaraSystemInstanceID& SystemInstance)
+{
+	FNDIGaussianCountProxy::ProvidePerInstanceDataForRenderThread(DataForRenderThread, PerInstanceData, SystemInstance);
+}
+
+void USceneNiagaraInterface::DestroyPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
+{
+	FNDIGaussianCountInstanceData* InstanceData = static_cast<FNDIGaussianCountInstanceData*>(PerInstanceData);
+	InstanceData->~FNDIGaussianCountInstanceData();
+
+	ENQUEUE_RENDER_COMMAND(RemoveProxy)
+	(
+		[RT_Proxy=GetProxyAs<FNDIGaussianCountProxy>(), InstanceID=SystemInstance->GetId()](
+		FRHICommandListImmediate& CmdList)
+		{
+			RT_Proxy->SystemInstancesToInstanceData_RT.Remove(InstanceID);
+		}
+	);
+}
+
+bool USceneNiagaraInterface::HasPreSimulateTick() const
+{
+	return true;
 }
 
 void USceneNiagaraInterface::GetVMExternalFunction(const FVMExternalFunctionBindingInfo& BindingInfo,
@@ -121,72 +248,31 @@ void USceneNiagaraInterface::GetVMExternalFunction(const FVMExternalFunctionBind
 {
 	if (BindingInfo.Name == GetGaussianCountName)
 	{
-		OutFunc = FVMExternalFunction::CreateUObject(this, &USceneNiagaraInterface::GetGaussianCount);
-	}
-	else if (BindingInfo.Name == GetGaussianDataName)
-	{
-		OutFunc = FVMExternalFunction::CreateUObject(this, &USceneNiagaraInterface::GetGaussianData);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("USceneNiagaraInterface::GetVMExternalFunction - Unknown function name: %s"),
-		       *BindingInfo.Name.ToString());
-	}
-}
-
-#if WITH_EDITORONLY_DATA
-void USceneNiagaraInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const
-{
-	FNiagaraFunctionSignature CountSig;
-	CountSig.Name = GetGaussianCountName;
-	CountSig.Inputs.Add(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("SceneNiagaraInterface")));
-	CountSig.Outputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Count")));
-	OutFunctions.Add(CountSig);
-
-	FNiagaraFunctionSignature DataSig;
-	DataSig.Name = GetGaussianDataName;
-	DataSig.Inputs.Add(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("SceneNiagaraInterface")));
-	DataSig.Inputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Index")));
-	DataSig.Outputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(), TEXT("Position")));
-	DataSig.Outputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(), TEXT("Scale")));
-	OutFunctions.Add(DataSig);
-}
-#endif
-
-void USceneNiagaraInterface::GetGaussianCount(FVectorVMExternalFunctionContextProxy& Context) const
-{
-	VectorVM::FExternalFuncRegisterHandler<int32> OutCount(Context);
-
-	for (int32 i = 0; i < Context.GetNumInstances(); ++i)
-	{
-		const int32 Count = SceneBufferAsset ? SceneBufferAsset->Gaussians.Num() : 0;
-		*OutCount.GetDest() = Count;
-	}
-}
-
-void USceneNiagaraInterface::GetGaussianData(FVectorVMExternalFunctionContextProxy& Context) const
-{
-	VectorVM::FExternalFuncInputHandler<int32> IndexParam(Context);
-	VectorVM::FExternalFuncRegisterHandler<FVector> OutPosition(Context);
-	VectorVM::FExternalFuncRegisterHandler<FVector> OutScale(Context);
-
-	for (int32 i = 0; i < Context.GetNumInstances(); ++i)
-	{
-		const int32 Index = IndexParam.GetAndAdvance();
-		if (SceneBufferAsset && SceneBufferAsset->Gaussians.IsValidIndex(Index))
+		OutFunc = FVMExternalFunction::CreateLambda([this](FVectorVMExternalFunctionContext& Context)
 		{
-			const FGaussian& G = SceneBufferAsset->Gaussians[Index];
-			*OutPosition.GetDest() = G.Position;
-			*OutScale.GetDest() = G.Scale;
-		}
-		else
-		{
-			*OutPosition.GetDest() = FVector::ZeroVector;
-			*OutScale.GetDest() = FVector::OneVector;
-		}
+			this->GetGaussianCountVM(Context);
+		});
+		return;
+	}
+	UE_LOG(LogTemp, Error,
+	       TEXT("USceneNiagaraInterface::GetVMExternalFunction - CPU execution is not supported for function %s"),
+	       *BindingInfo.Name.ToString());
+}
 
-		OutPosition.Advance();
-		OutScale.Advance();
+void USceneNiagaraInterface::GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const
+{
+	VectorVM::FUserPtrHandler<FNDIGaussianCountInstanceData> GaussianCountInstanceData(Context);
+	FNDIOutputParam<int32> OutCount(Context);
+
+	for (size_t i = 0; i < Context.GetNumInstances(); ++i)
+	{
+		OutCount.SetAndAdvance(GaussianCountInstanceData.Get()->GaussianCount);
+
+		UE_LOG(LogTemp, Log,
+		       TEXT(
+			       "USceneNiagaraInterface::GetGaussianCountVM - Returned GaussianCount %d for instance %llu"
+		       ),
+		       GaussianCountInstanceData.Get()->GaussianCount,
+		       i);
 	}
 }

@@ -1,1 +1,7 @@
 ﻿int {ParameterName}_GaussianCount;
+
+void GetGaussianCount_{ParameterName}(out int Out_Count)
+{
+	Out_Count = {ParameterName}_GaussianCount;
+	Out_Count = 100;
+}
