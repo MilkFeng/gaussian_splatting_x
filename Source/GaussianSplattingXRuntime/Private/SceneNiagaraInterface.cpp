@@ -50,7 +50,7 @@ struct FNDIGaussianCountProxy : public FNiagaraDataInterfaceProxy
 	TMap<FNiagaraSystemInstanceID, FNDIGaussianCountInstanceData> SystemInstancesToInstanceData_RT;
 };
 
-USceneNiagaraInterface::USceneNiagaraInterface(FObjectInitializer const& ObjectInitializer)
+USceneNiagaraInterface::USceneNiagaraInterface(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	Proxy.Reset(new FNDIGaussianCountProxy());
@@ -61,7 +61,14 @@ void USceneNiagaraInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignatu
 {
 	FNiagaraFunctionSignature CountSig;
 	CountSig.Name = GetGaussianCountName;
+	// 如果为真，第一个参数会隐式传递 this 指针，那么在 VM（CPU）可以直接访问成员变量，在 HLSL（GPU）可以通过设置的 Parameter 访问
 	CountSig.bMemberFunction = true;
+	// 如果为真，表示这个函数只进行读取操作，不会修改任何数据，应该是用来优化的
+	CountSig.bReadFunction = true;
+	// 是否支持 CPU 和 GPU 执行，如果实现了 VM（CPU）和 HLSL（GPU）的接口，就都设为真
+	CountSig.bSupportsCPU = CountSig.bSupportsGPU = true;
+	// 指定这个函数在哪些 Niagara 脚本类型中可用，比如 Particle、Emitter、System 等等
+	CountSig.ModuleUsageBitmask = ENiagaraScriptUsageMask::Emitter;
 	CountSig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("Scene Interface")));
 	CountSig.AddOutput(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Count")));
 	OutFunctions.Add(CountSig);
@@ -116,6 +123,25 @@ void USceneNiagaraInterface::PostEditChangeProperty(FPropertyChangedEvent& Prope
 	       Asset ? Asset->Gaussians.Num() : 0, (SceneBufferAsset == nullptr));
 }
 
+bool USceneNiagaraInterface::CanExecuteOnTarget(ENiagaraSimTarget Target) const
+{
+	return true;
+}
+
+bool USceneNiagaraInterface::CopyToInternal(UNiagaraDataInterface* Destination) const
+{
+	if (!Super::CopyToInternal(Destination))
+	{
+		return false;
+	}
+
+	if (USceneNiagaraInterface* Other = Cast<USceneNiagaraInterface>(Destination))
+	{
+		Other->SceneBufferAsset = SceneBufferAsset;
+	}
+	return true;
+}
+
 bool USceneNiagaraInterface::Equals(const UNiagaraDataInterface* Other) const
 {
 	if (!Super::Equals(Other))
@@ -124,11 +150,6 @@ bool USceneNiagaraInterface::Equals(const UNiagaraDataInterface* Other) const
 	}
 
 	return SceneBufferAsset == CastChecked<USceneNiagaraInterface>(Other)->SceneBufferAsset;
-}
-
-bool USceneNiagaraInterface::CanExecuteOnTarget(ENiagaraSimTarget Target) const
-{
-	return true;
 }
 
 bool USceneNiagaraInterface::AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const
@@ -186,6 +207,7 @@ int USceneNiagaraInterface::PerInstanceDataSize() const
 
 bool USceneNiagaraInterface::InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
 {
+	// placed new
 	FNDIGaussianCountInstanceData* InstanceData = new(PerInstanceData) FNDIGaussianCountInstanceData();
 
 	const USceneBufferAsset* Asset = SceneBufferAsset.LoadSynchronous();
@@ -261,18 +283,11 @@ void USceneNiagaraInterface::GetVMExternalFunction(const FVMExternalFunctionBind
 
 void USceneNiagaraInterface::GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const
 {
-	VectorVM::FUserPtrHandler<FNDIGaussianCountInstanceData> GaussianCountInstanceData(Context);
-	FNDIOutputParam<int32> OutCount(Context);
+	const int Count = SceneBufferAsset ? SceneBufferAsset->Gaussians.Num() : 0;
 
+	FNDIOutputParam<int> OutCount(Context);
 	for (size_t i = 0; i < Context.GetNumInstances(); ++i)
 	{
-		OutCount.SetAndAdvance(GaussianCountInstanceData.Get()->GaussianCount);
-
-		UE_LOG(LogTemp, Log,
-		       TEXT(
-			       "USceneNiagaraInterface::GetGaussianCountVM - Returned GaussianCount %d for instance %llu"
-		       ),
-		       GaussianCountInstanceData.Get()->GaussianCount,
-		       i);
+		OutCount.SetAndAdvance(Count);
 	}
 }

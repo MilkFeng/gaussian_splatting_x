@@ -18,10 +18,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Scene")
 	TSoftObjectPtr<USceneBufferAsset> SceneBufferAsset;
 
-	explicit USceneNiagaraInterface(FObjectInitializer const& ObjectInitializer);
+	explicit USceneNiagaraInterface(const FObjectInitializer& ObjectInitializer);
 
 private:
-	// =============================== 定义传给 HLSL（GPU）的数据结构 ===============================
+	// =============================== 暴露给 HLSL（GPU）的数据结构 ===============================
 	BEGIN_SHADER_PARAMETER_STRUCT(FShaderParameters,)
 		SHADER_PARAMETER(int32, GaussianCount)
 	END_SHADER_PARAMETER_STRUCT()
@@ -33,19 +33,24 @@ protected:
 #endif
 
 public:
-	// =============================== UObject 相关函数，管理生命周期等 ===============================
+	// =============================== 管理生命周期 ===============================
 	/// 在对象被构造完毕并初始化其 UProperty（反射属性）后调用，CDO（Class Default Object）也会调用
 	virtual void PostInitProperties() override;
 #if WITH_EDITOR
 	/// 在编辑器中，当某个 UProperty 被修改后调用
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
-	virtual bool Equals(const UNiagaraDataInterface* Other) const override;
 
 	// =============================== Niagara Data Interface 的配置 ===============================
 	virtual bool CanExecuteOnTarget(ENiagaraSimTarget Target) const override;
+	/// 在 Editor 中编辑的对象会被复制到运行时对象中，这个函数定义了如何复制
+	/// 如果不实现这个函数，默认的浅拷贝可能会导致运行时对象不存在正确的 SceneBufferAsset
+	virtual bool CopyToInternal(UNiagaraDataInterface* Destination) const override;
+	/// 用于比较两个 Data Interface 是否相等，决定是否需要重新编译 Niagara 系统或者重新传递数据
+	virtual bool Equals(const UNiagaraDataInterface* Other) const override;
 
 	// =============================== HLSL（GPU）接口 Bridge ===============================
+	// note: 如果函数不是 MemberFunction，那么无法访问 ShaderParameters（有待验证）
 #if WITH_EDITORONLY_DATA
 	virtual bool AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const override;
 	virtual bool GetFunctionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
@@ -59,7 +64,8 @@ public:
 	virtual void SetShaderParameters(const FNiagaraDataInterfaceSetShaderParametersContext& Context) const override;
 
 	// =============================== 数据接口，用于向 VM（CPU）和 HLSL（GPU）传输数据 ===============================
-	// note: InstanceData 是每一个实例携带的数据，实例可能是 Emitter，也可能是 Particle
+	// note: InstanceData 是每一个实例携带的数据，一个示例可以对应一个 Emitter，也可以对应一个 Particle
+	// note: 如果一个函数是 MemberFunction，那么也可以访问 DataInterface 的变量（VM），或者访问 ShaderParameters（HLSL，这个有待验证）
 	virtual int PerInstanceDataSize() const override;
 	virtual bool InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance) override;
 	virtual bool PerInstanceTick(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance,
