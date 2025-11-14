@@ -1,4 +1,5 @@
-﻿//! 参考实例： https://github.com/EpicGames/UnrealEngine/tree/release/Engine/Plugins/FX/ExampleCustomDataInterface
+﻿//! 参考官方实例： https://github.com/EpicGames/UnrealEngine/tree/release/Engine/Plugins/FX/ExampleCustomDataInterface
+//! 参考视频：https://www.bilibili.com/video/BV1moZHY4EHz
 
 #pragma once
 
@@ -16,14 +17,14 @@ class GAUSSIANSPLATTINGXRUNTIME_API USceneNiagaraInterface : public UNiagaraData
 
 public:
 	UPROPERTY(EditAnywhere, Category = "Scene")
-	TSoftObjectPtr<USceneBufferAsset> SceneBufferAsset;
+	FNiagaraUserParameterBinding UserParameterBinding;
 
 	explicit USceneNiagaraInterface(const FObjectInitializer& ObjectInitializer);
 
 private:
 	// =============================== 暴露给 HLSL（GPU）的数据结构 ===============================
 	BEGIN_SHADER_PARAMETER_STRUCT(FShaderParameters,)
-		SHADER_PARAMETER(int32, GaussianCount)
+		SHADER_PARAMETER_SRV(Buffer<FVector>, PositionBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 protected:
@@ -43,14 +44,14 @@ public:
 
 	// =============================== Niagara Data Interface 的配置 ===============================
 	virtual bool CanExecuteOnTarget(ENiagaraSimTarget Target) const override;
-	/// 在 Editor 中编辑的对象会被复制到运行时对象中，这个函数定义了如何复制
-	/// 如果不实现这个函数，默认的浅拷贝可能会导致运行时对象不存在正确的 SceneBufferAsset
+	/// 如果设置了 MemberFunction，那么 Niagara 会将对象复制到 Render Thread 中
+	/// 如果不实现这个函数，默认的浅拷贝可能会导致 Render Thread 对象不存在正确的 SceneBufferAsset
 	virtual bool CopyToInternal(UNiagaraDataInterface* Destination) const override;
 	/// 用于比较两个 Data Interface 是否相等，决定是否需要重新编译 Niagara 系统或者重新传递数据
 	virtual bool Equals(const UNiagaraDataInterface* Other) const override;
 
 	// =============================== HLSL（GPU）接口 Bridge ===============================
-	// note: 如果函数不是 MemberFunction，那么无法访问 ShaderParameters（有待验证）
+	// note: 如果函数不是 MemberFunction，那么无法访问 ShaderParameters
 #if WITH_EDITORONLY_DATA
 	virtual bool AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const override;
 	virtual bool GetFunctionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
@@ -65,7 +66,7 @@ public:
 
 	// =============================== 数据接口，用于向 VM（CPU）和 HLSL（GPU）传输数据 ===============================
 	// note: InstanceData 是每一个实例携带的数据，一个示例可以对应一个 Emitter，也可以对应一个 Particle
-	// note: 如果一个函数是 MemberFunction，那么也可以访问 DataInterface 的变量（VM），或者访问 ShaderParameters（HLSL，这个有待验证）
+	// note: 如果一个函数是 MemberFunction，那么也可以访问 DataInterface 的变量（VM），或者访问 ShaderParameters（HLSL）
 	virtual int PerInstanceDataSize() const override;
 	virtual bool InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance) override;
 	virtual bool PerInstanceTick(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance,

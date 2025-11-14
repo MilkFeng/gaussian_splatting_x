@@ -1,36 +1,39 @@
 ﻿#include "SceneNiagaraInterface.h"
+#include "SceneActor.h"
 
 #include "NiagaraCompileHashVisitor.h"
+#include "NiagaraRendererProperties.h"
+#include "NiagaraRenderer.h"
 #include "NiagaraShaderParametersBuilder.h"
 #include "NiagaraSystemInstance.h"
 
 const FName USceneNiagaraInterface::GetGaussianCountName = TEXT("GetGaussianCount");
 const FName USceneNiagaraInterface::GetGaussianDataName = TEXT("GetGaussianData");
 const FString USceneNiagaraInterface::GetGaussianCountShaderFile = TEXT(
-	"/Plugin/GaussianSplattingX/Private/SceneNiagaraInterface_GetGaussianCount.ush");
+	"/Plugin/GaussianSplattingX/Private/SceneNiagaraInterface_Shader.ush");
 
 // the struct used to store our data interface data
-struct FNDIGaussianCountInstanceData
+struct FNDIGaussianInstanceData
 {
-	int32 GaussianCount;
+	FVector Position;
 };
 
 // this proxy is used to safely copy data between game thread and render thread
-struct FNDIGaussianCountProxy : public FNiagaraDataInterfaceProxy
+struct FNDIGaussianProxy : public FNiagaraDataInterfaceProxy
 {
 	virtual int32 PerInstanceDataPassedToRenderThreadSize() const override
 	{
-		return sizeof(FNDIGaussianCountInstanceData);
+		return sizeof(FNDIGaussianInstanceData);
 	}
 
 	static void ProvidePerInstanceDataForRenderThread(void* InDataForRenderThread, void* InDataFromGameThread,
 	                                                  const FNiagaraSystemInstanceID& SystemInstance)
 	{
 		// initialize the render thread instance data into the pre-allocated memory
-		FNDIGaussianCountInstanceData* DataForRenderThread = new(InDataForRenderThread) FNDIGaussianCountInstanceData();
+		FNDIGaussianInstanceData* DataForRenderThread = new(InDataForRenderThread) FNDIGaussianInstanceData();
 
 		// we're just copying the game thread data, but the render thread data can be initialized to anything here and can be another struct entirely
-		const FNDIGaussianCountInstanceData* DataFromGameThread = static_cast<FNDIGaussianCountInstanceData*>(
+		const FNDIGaussianInstanceData* DataFromGameThread = static_cast<FNDIGaussianInstanceData*>(
 			InDataFromGameThread);
 		*DataForRenderThread = *DataFromGameThread;
 	}
@@ -38,49 +41,122 @@ struct FNDIGaussianCountProxy : public FNiagaraDataInterfaceProxy
 	virtual void
 	ConsumePerInstanceDataFromGameThread(void* PerInstanceData, const FNiagaraSystemInstanceID& InstanceID) override
 	{
-		FNDIGaussianCountInstanceData* InstanceDataFromGT = static_cast<FNDIGaussianCountInstanceData*>(
+		FNDIGaussianInstanceData* InstanceDataFromGT = static_cast<FNDIGaussianInstanceData*>(
 			PerInstanceData);
-		FNDIGaussianCountInstanceData& InstanceData = SystemInstancesToInstanceData_RT.FindOrAdd(InstanceID);
+		FNDIGaussianInstanceData& InstanceData = SystemInstancesToInstanceData_RT.FindOrAdd(InstanceID);
 		InstanceData = *InstanceDataFromGT;
 
 		// we call the destructor here to clean up the GT data. Without this we could be leaking memory.
-		InstanceDataFromGT->~FNDIGaussianCountInstanceData();
+		InstanceDataFromGT->~FNDIGaussianInstanceData();
 	}
 
-	TMap<FNiagaraSystemInstanceID, FNDIGaussianCountInstanceData> SystemInstancesToInstanceData_RT;
+	void LoadSceneBufferAsset(const FSoftObjectPath& SceneBufferAssetPath)
+	{
+		SceneBufferAsset = TSoftObjectPtr<USceneBufferAsset>(SceneBufferAssetPath);
+		SceneBufferAsset.LoadSynchronous();
+
+		UE_LOG(LogTemp, Log,
+		       TEXT("FNDIGaussianProxy::LoadSceneBufferAsset - Loaded SceneBufferAsset: %s"),
+		       *SceneBufferAssetPath.ToString());
+	}
+
+	void PostSRV()
+	{
+		if (!IsValid())
+		{
+			return;
+		}
+
+		ENQUEUE_RENDER_COMMAND(FUpdateGaussianBuffer)(
+			[this](FRHICommandListImmediate& RHICmdList)
+			{
+				{
+					const size_t BufferSize = SceneBufferAsset->GaussianCount * sizeof(FVector);
+
+					// 初始化 Buffer
+					if (BufferSize > 0 && !GaussianPositionBuffer.NumBytes)
+					{
+						GaussianPositionBuffer.Initialize(RHICmdList, TEXT("PositionBuffer"), sizeof(FVector),
+						                                  SceneBufferAsset->GaussianCount, PF_R32G32B32F,
+						                                  BUF_Static);
+					}
+
+					// 如果初始化成功，更新数据到 Buffer
+					if (GaussianPositionBuffer.NumBytes > 0)
+					{
+						// 上锁，准备写入数据
+						float* MappedData = static_cast<float*>(
+							RHICmdList.LockBuffer(GaussianPositionBuffer.Buffer, 0, BufferSize, RLM_WriteOnly));
+						FPlatformMemory::Memcpy(MappedData, &SceneBufferAsset->GaussianPositions, BufferSize);
+						RHICmdList.UnlockBuffer(GaussianPositionBuffer.Buffer);
+					}
+				}
+
+				// after the draw we can clear out the data for the next frame
+				SystemInstancesToInstanceData_RT.Empty();
+			});
+	}
+
+	const USceneBufferAsset& GetSceneBufferAsset() const
+	{
+		return *SceneBufferAsset;
+	}
+
+	bool IsValid() const
+	{
+		return SceneBufferAsset.IsValid();
+	}
+
+	TMap<FNiagaraSystemInstanceID, FNDIGaussianInstanceData> SystemInstancesToInstanceData_RT;
+
+	// =============================== Buffer ===============================
+	FReadBuffer GaussianPositionBuffer;
+
+private:
+	TSoftObjectPtr<USceneBufferAsset> SceneBufferAsset;
 };
 
 USceneNiagaraInterface::USceneNiagaraInterface(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	Proxy.Reset(new FNDIGaussianCountProxy());
+	Proxy.Reset(new FNDIGaussianProxy());
 }
 
 #if WITH_EDITORONLY_DATA
 void USceneNiagaraInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const
 {
-	FNiagaraFunctionSignature CountSig;
-	CountSig.Name = GetGaussianCountName;
-	// 如果为真，第一个参数会隐式传递 this 指针，那么在 VM（CPU）可以直接访问成员变量，在 HLSL（GPU）可以通过设置的 Parameter 访问
-	CountSig.bMemberFunction = true;
-	// 如果为真，表示这个函数只进行读取操作，不会修改任何数据，应该是用来优化的
-	CountSig.bReadFunction = true;
-	// 是否支持 CPU 和 GPU 执行，如果实现了 VM（CPU）和 HLSL（GPU）的接口，就都设为真
-	CountSig.bSupportsCPU = CountSig.bSupportsGPU = true;
-	// 指定这个函数在哪些 Niagara 脚本类型中可用，比如 Particle、Emitter、System 等等
-	CountSig.ModuleUsageBitmask = ENiagaraScriptUsageMask::Emitter;
-	CountSig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("Scene Interface")));
-	CountSig.AddOutput(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Count")));
-	OutFunctions.Add(CountSig);
+	// 获取高斯数量
+	{
+		FNiagaraFunctionSignature Sig;
+		Sig.Name = GetGaussianCountName;
+		// 如果为真，第一个参数会隐式传递 this 指针，那么在 VM（CPU）可以直接访问成员变量，在 HLSL（GPU）可以通过设置的 Parameter 访问
+		Sig.bMemberFunction = true;
+		// 如果为真，表示这个函数只进行读取操作，不会修改任何数据，应该是用来优化的
+		Sig.bReadFunction = true;
+		// 是否支持 CPU 和 GPU 执行，这个函数只在 Emitter 阶段使用，所以只支持 CPU
+		Sig.bSupportsCPU = true;
+		Sig.bSupportsGPU = false;
+		// 指定这个函数在哪些 Niagara 脚本类型中可用，比如 Particle、Emitter、System 等等
+		Sig.ModuleUsageBitmask = ENiagaraScriptUsageMask::System | ENiagaraScriptUsageMask::Emitter;
+		Sig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("Scene Niagara Data Interface")));
+		Sig.AddOutput(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Count")));
+		OutFunctions.Add(Sig);
+	}
 
-	// FNiagaraFunctionSignature DataSig;
-	// DataSig.Name = GetGaussianDataName;
-	// CountSig.bMemberFunction = true;
-	// DataSig.Inputs.Add(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("SceneNiagaraInterface")));
-	// DataSig.Inputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Index")));
-	// DataSig.Outputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(), TEXT("Position")));
-	// DataSig.Outputs.Add(FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(), TEXT("Scale")));
-	// OutFunctions.Add(DataSig);
+	// 获取高斯数据
+	{
+		FNiagaraFunctionSignature Sig;
+		Sig.Name = GetGaussianDataName;
+		Sig.bMemberFunction = true;
+		Sig.bReadFunction = true;
+		Sig.bSupportsCPU = false;
+		Sig.bSupportsGPU = true;
+		Sig.ModuleUsageBitmask = ENiagaraScriptUsageMask::Particle;
+		Sig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("Scene Niagara Data Interface")));
+		Sig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Index")));
+		Sig.AddOutput(FNiagaraVariable(FNiagaraTypeDefinition::GetVec4Def(), TEXT("Position")));
+		OutFunctions.Add(Sig);
+	}
 
 	UE_LOG(LogTemp, Log,
 	       TEXT("USceneNiagaraInterface::GetFunctionsInternal - Registered %d functions."),
@@ -115,16 +191,11 @@ void USceneNiagaraInterface::PostInitProperties()
 void USceneNiagaraInterface::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-
-	const USceneBufferAsset* Asset = SceneBufferAsset.LoadSynchronous();
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("PostEditChangeProperty - Loaded SceneBufferAsset, Count=%d, SceneBufferAsset is nullptr:%d"),
-	       Asset ? Asset->Gaussians.Num() : 0, (SceneBufferAsset == nullptr));
 }
 
 bool USceneNiagaraInterface::CanExecuteOnTarget(ENiagaraSimTarget Target) const
 {
+	// CPU 和 GPU 都支持
 	return true;
 }
 
@@ -137,7 +208,7 @@ bool USceneNiagaraInterface::CopyToInternal(UNiagaraDataInterface* Destination) 
 
 	if (USceneNiagaraInterface* Other = Cast<USceneNiagaraInterface>(Destination))
 	{
-		Other->SceneBufferAsset = SceneBufferAsset;
+		Other->UserParameterBinding = UserParameterBinding;
 	}
 	return true;
 }
@@ -149,7 +220,7 @@ bool USceneNiagaraInterface::Equals(const UNiagaraDataInterface* Other) const
 		return false;
 	}
 
-	return SceneBufferAsset == CastChecked<USceneNiagaraInterface>(Other)->SceneBufferAsset;
+	return UserParameterBinding == CastChecked<USceneNiagaraInterface>(Other)->UserParameterBinding;
 }
 
 bool USceneNiagaraInterface::AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const
@@ -168,7 +239,7 @@ bool USceneNiagaraInterface::GetFunctionHLSL(const FNiagaraDataInterfaceGPUParam
                                              const FNiagaraDataInterfaceGeneratedFunction& FunctionInfo,
                                              int FunctionInstanceIndex, FString& OutHLSL)
 {
-	return FunctionInfo.DefinitionName == GetGaussianCountName;
+	return FunctionInfo.DefinitionName == GetGaussianDataName;
 }
 
 void USceneNiagaraInterface::GetParameterDefinitionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
@@ -187,36 +258,57 @@ void USceneNiagaraInterface::BuildShaderParameters(FNiagaraShaderParametersBuild
 
 void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetShaderParametersContext& Context) const
 {
-	FNDIGaussianCountProxy& DataInterfaceProxy = Context.GetProxy<FNDIGaussianCountProxy>();
-	FNDIGaussianCountInstanceData& InstanceData = DataInterfaceProxy.SystemInstancesToInstanceData_RT.FindChecked(
+	FNDIGaussianProxy& DataInterfaceProxy = Context.GetProxy<FNDIGaussianProxy>();
+	FNDIGaussianInstanceData& InstanceData = DataInterfaceProxy.SystemInstancesToInstanceData_RT.FindChecked(
 		Context.GetSystemInstanceID());
 
 	FShaderParameters* ShaderParameters = Context.GetParameterNestedStruct<FShaderParameters>();
 
-	ShaderParameters->GaussianCount = InstanceData.GaussianCount;
-	UE_LOG(LogTemp, Log,
-	       TEXT("USceneNiagaraInterface::SetShaderParameters - Set GaussianCount to %d for SystemInstanceID %llu"),
-	       ShaderParameters->GaussianCount,
-	       Context.GetSystemInstanceID());
+	DataInterfaceProxy.PostSRV();
+	ShaderParameters->PositionBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
+		DataInterfaceProxy.GaussianPositionBuffer.SRV);
 }
 
 int USceneNiagaraInterface::PerInstanceDataSize() const
 {
-	return sizeof(FNDIGaussianCountInstanceData);
+	return sizeof(FNDIGaussianInstanceData);
 }
 
 bool USceneNiagaraInterface::InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
 {
-	// placed new
-	FNDIGaussianCountInstanceData* InstanceData = new(PerInstanceData) FNDIGaussianCountInstanceData();
+	FNDIGaussianProxy* DataInterfaceProxy = GetProxyAs<FNDIGaussianProxy>();
+	FNDIGaussianInstanceData* InstanceData = new(PerInstanceData) FNDIGaussianInstanceData();
+	InstanceData->Position = FVector::ZeroVector;
 
-	const USceneBufferAsset* Asset = SceneBufferAsset.LoadSynchronous();
-	InstanceData->GaussianCount = Asset ? Asset->Gaussians.Num() : 0;
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("InitPerInstanceData - Loaded SceneBufferAsset, Count=%d"),
-	       InstanceData->GaussianCount);
-
+	const FNiagaraUserRedirectionParameterStore* Store = SystemInstance->GetOverrideParameters();
+	TArray<FNiagaraVariable> OutParameters;
+	Store->GetUserParameters(OutParameters);
+	for (const FNiagaraVariable& Var : OutParameters)
+	{
+		UE_LOG(LogTemp, Log,
+		       TEXT("USceneNiagaraInterface::InitPerInstanceData - User Parameter: %s, Type: %s"),
+		       *Var.GetName().ToString(), *Var.GetType().GetName());
+	}
+	UObject* Object = Store->GetUObject(UserParameterBinding.Parameter);
+	if (Object)
+	{
+		UE_LOG(LogTemp, Log,
+		       TEXT("USceneNiagaraInterface::InitPerInstanceData - Found bound object: %s, Type: %s"),
+		       *Object->GetName(), *Object->GetClass()->GetName());
+	} else
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("USceneNiagaraInterface::InitPerInstanceData - No object bound to User Parameter: %s"),
+		       *UserParameterBinding.Parameter.GetName().ToString());
+	}
+	const USceneNiagaraParameter* NiagaraParameter = Cast<USceneNiagaraParameter>(Object);
+	if (NiagaraParameter)
+	{
+		UE_LOG(LogTemp, Log,
+		       TEXT("USceneNiagaraInterface::InitPerInstanceData - Loading SceneBufferAsset from path: %s"),
+		       *NiagaraParameter->SceneBufferAssetPath.ToString());
+		DataInterfaceProxy->LoadSceneBufferAsset(NiagaraParameter->SceneBufferAssetPath);
+	}
 	return true;
 }
 
@@ -224,35 +316,29 @@ bool USceneNiagaraInterface::PerInstanceTick(void* PerInstanceData, FNiagaraSyst
                                              const float DeltaSeconds)
 {
 	check(SystemInstance);
-	FNDIGaussianCountInstanceData* InstanceData = static_cast<FNDIGaussianCountInstanceData*>(PerInstanceData);
+	FNDIGaussianInstanceData* InstanceData = static_cast<FNDIGaussianInstanceData*>(PerInstanceData);
 
 	if (!InstanceData)
 	{
 		return true;
 	}
-
-	InstanceData->GaussianCount = SceneBufferAsset ? SceneBufferAsset->Gaussians.Num() : 0;
-	UE_LOG(LogTemp, Log,
-	       TEXT("USceneNiagaraInterface::PerInstanceTick - Updated GaussianCount to %d for SystemInstanceID %llu"),
-	       InstanceData->GaussianCount,
-	       SystemInstance->GetId());
 	return false;
 }
 
 void USceneNiagaraInterface::ProvidePerInstanceDataForRenderThread(void* DataForRenderThread, void* PerInstanceData,
                                                                    const FNiagaraSystemInstanceID& SystemInstance)
 {
-	FNDIGaussianCountProxy::ProvidePerInstanceDataForRenderThread(DataForRenderThread, PerInstanceData, SystemInstance);
+	FNDIGaussianProxy::ProvidePerInstanceDataForRenderThread(DataForRenderThread, PerInstanceData, SystemInstance);
 }
 
 void USceneNiagaraInterface::DestroyPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
 {
-	FNDIGaussianCountInstanceData* InstanceData = static_cast<FNDIGaussianCountInstanceData*>(PerInstanceData);
-	InstanceData->~FNDIGaussianCountInstanceData();
+	FNDIGaussianInstanceData* InstanceData = static_cast<FNDIGaussianInstanceData*>(PerInstanceData);
+	InstanceData->~FNDIGaussianInstanceData();
 
 	ENQUEUE_RENDER_COMMAND(RemoveProxy)
 	(
-		[RT_Proxy=GetProxyAs<FNDIGaussianCountProxy>(), InstanceID=SystemInstance->GetId()](
+		[RT_Proxy=GetProxyAs<FNDIGaussianProxy>(), InstanceID=SystemInstance->GetId()](
 		FRHICommandListImmediate& CmdList)
 		{
 			RT_Proxy->SystemInstancesToInstanceData_RT.Remove(InstanceID);
@@ -283,9 +369,13 @@ void USceneNiagaraInterface::GetVMExternalFunction(const FVMExternalFunctionBind
 
 void USceneNiagaraInterface::GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const
 {
-	const int Count = SceneBufferAsset ? SceneBufferAsset->Gaussians.Num() : 0;
+	const FNDIGaussianProxy* DataInterfaceProxy = GetProxyAs<FNDIGaussianProxy>();
 
+	VectorVM::FUserPtrHandler<FNDIGaussianInstanceData> InstData(Context);
 	FNDIOutputParam<int> OutCount(Context);
+
+	const int Count = DataInterfaceProxy->IsValid() ? DataInterfaceProxy->GetSceneBufferAsset().GaussianCount : 0;
+
 	for (size_t i = 0; i < Context.GetNumInstances(); ++i)
 	{
 		OutCount.SetAndAdvance(Count);

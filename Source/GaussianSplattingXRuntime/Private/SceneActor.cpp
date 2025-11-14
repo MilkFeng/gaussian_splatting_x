@@ -11,15 +11,34 @@ ASceneActor::ASceneActor()
 
 void ASceneActor::OnConstruction(const FTransform& Transform)
 {
-	if (NiagaraComp && SceneNiagaraInterface)
+	if (NiagaraComp && SceneNiagaraParameter)
 	{
+		UE_LOG(LogTemp, Log,
+	   TEXT(
+		   "OnConstruction - SceneNiagaraParameter is nullptr: %d"
+	   ), SceneNiagaraParameter == nullptr);
+		// 这里必须先设置 User Parameter，再设置 Asset
+		NiagaraComp->SetVariableObject(TEXT("User.SceneNiagaraParameter"), SceneNiagaraParameter.Get());
+
 		// 加载 Niagara System 资源
 		NiagaraComp->SetAsset(
 			LoadObject<UNiagaraSystem>(
 				nullptr, TEXT(
 					"/Script/Niagara.NiagaraSystem'/GaussianSplattingX/FX_GaussianSplattingX.FX_GaussianSplattingX'")));
 
-		// 将场景数据资源传递给 Niagara Component
-		NiagaraComp->SetVariableObject(TEXT("SceneBuffer"), SceneNiagaraInterface);
+		UE_LOG(LogTemp, Log,
+		       TEXT("OnConstruction - Set Niagara System Asset: %s"),
+		       *NiagaraComp->GetAsset()->GetName());
 	}
+}
+
+void ASceneActor::PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	UE_LOG(LogTemp, Log,
+	       TEXT(
+		       "PostEditChangeProperty - Updating Niagara Component with new SceneNiagaraParameter, SceneNiagaraParameter is nullptr: %d"
+	       ), SceneNiagaraParameter == nullptr);
+
+	NiagaraComp->SetVariableObject(TEXT("User.SceneNiagaraParameter"), SceneNiagaraParameter.Get());
 }

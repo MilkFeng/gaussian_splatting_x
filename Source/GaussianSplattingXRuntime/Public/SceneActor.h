@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "NiagaraComponent.h"
-#include "SceneNiagaraInterface.h"
+#include "SceneNiagaraParameter.h"
 
 #include "SceneActor.generated.h"
 
@@ -13,8 +13,8 @@ class GAUSSIANSPLATTINGXRUNTIME_API ASceneActor : public AActor
 
 public:
 	// Niagara Data Interface
-	UPROPERTY()
-	TObjectPtr<USceneNiagaraInterface> SceneNiagaraInterface;
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<USceneNiagaraParameter> SceneNiagaraParameter;
 
 	// 用来运行 Niagara System 的组件
 	UPROPERTY()
@@ -23,4 +23,6 @@ public:
 	ASceneActor();
 
 	virtual void OnConstruction(const FTransform& Transform) override;
+
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 };

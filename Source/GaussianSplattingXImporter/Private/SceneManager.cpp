@@ -3,9 +3,12 @@
 #include <format>
 #include <fstream>
 
+#include "BlueprintCompilationManager.h"
+#include "FileHelpers.h"
 #include "SceneActor.h"
 #include "tinyply.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "UObject/SavePackage.h"
 
@@ -122,25 +125,22 @@ bool FSceneManager::ReadPlyFile(const FString& FilePath, USceneBufferAsset& Scen
 		// 读取所有的顶点
 		File.read(FileStream);
 
-		Scene.Gaussians.SetNum(Vertices->count);
-		for (size_t i = 0; i < Vertices->count; ++i)
+		Scene.SetGaussianCount(Vertices->count);
+		for (size_t i = 0; i < Scene.GaussianCount; ++i)
 		{
 			const float* VertexData = reinterpret_cast<const float*>(Vertices->buffer.get_const()) + i * PropertyKeys.
 				size();
 
-			FGaussian& Gaussian = Scene.Gaussians[i];
-			Gaussian.Position = FVector{VertexData[0], VertexData[1], VertexData[2]};
-			Gaussian.Opacity = VertexData[3];
-			Gaussian.Scale = FVector{VertexData[4], VertexData[5], VertexData[6]};
-			Gaussian.Rotation = FQuat{VertexData[7], VertexData[8], VertexData[9], VertexData[10]};
-			Gaussian.SHDim = Scene.SHDim;
-			Gaussian.SHCoefficientsCount = Scene.SHCoefficientsCount;
-			Gaussian.SHCoefficients.SetNumZeroed(Gaussian.SHCoefficientsCount);
-			for (size_t j = 0; j < Gaussian.SHCoefficientsCount; ++j)
+			Scene.GaussianPositions[i] = FVector{VertexData[0], VertexData[1], VertexData[2]};
+			Scene.GaussianOpacities[i] = VertexData[3];
+			Scene.GaussianScales[i] = FVector{VertexData[4], VertexData[5], VertexData[6]};
+			Scene.GaussianRotations[i] = FQuat{VertexData[7], VertexData[8], VertexData[9], VertexData[10]};
+			for (size_t j = 0; j < Scene.SHCoefficientsCount; ++j)
 			{
 				for (size_t k = 0; k < 3; ++k)
 				{
-					Gaussian.SHCoefficients[j][k] = VertexData[11 + j * 3 + k];
+					Scene.GaussianSHCoefficients[i * Scene.SHCoefficientsCount + j][k] =
+						VertexData[11 + j * 3 + k];
 				}
 			}
 
@@ -151,17 +151,20 @@ bool FSceneManager::ReadPlyFile(const FString& FilePath, USceneBufferAsset& Scen
 				       "Gaussian %llu: Pos(%.3f, %.3f, %.3f), Scale(%.3f, %.3f, %.3f), Rot(%.3f, %.3f, %.3f, %.3f), Alpha(%.3f), SH(%.3f, %.3f, %.3f, ..., %.3f, %.3f, %.3f)"
 			       ),
 			       i,
-			       Gaussian.Position.X, Gaussian.Position.Y, Gaussian.Position.Z,
-			       Gaussian.Scale.X, Gaussian.Scale.Y, Gaussian.Scale.Z,
-			       Gaussian.Rotation.X, Gaussian.Rotation.Y, Gaussian.Rotation.Z, Gaussian.Rotation.W,
-			       Gaussian.Opacity,
-			       Gaussian.SHCoefficients[0][0], Gaussian.SHCoefficients[0][1], Gaussian.SHCoefficients[0][2],
-			       Gaussian.SHCoefficients[Gaussian.SHCoefficientsCount - 1][0],
-			       Gaussian.SHCoefficients[Gaussian.SHCoefficientsCount - 1][1],
-			       Gaussian.SHCoefficients[Gaussian.SHCoefficientsCount - 1][2]);
+			       Scene.GaussianPositions[i].X, Scene.GaussianPositions[i].Y, Scene.GaussianPositions[i].Z,
+			       Scene.GaussianScales[i].X, Scene.GaussianScales[i].Y, Scene.GaussianScales[i].Z,
+			       Scene.GaussianRotations[i].X, Scene.GaussianRotations[i].Y, Scene.GaussianRotations[i].Z,
+			       Scene.GaussianRotations[i].W,
+			       Scene.GaussianOpacities[i],
+			       Scene.GaussianSHCoefficients[i * Scene.SHCoefficientsCount + 0][0],
+			       Scene.GaussianSHCoefficients[i * Scene.SHCoefficientsCount + 0][1],
+			       Scene.GaussianSHCoefficients[i * Scene.SHCoefficientsCount + 0][2],
+			       Scene.GaussianSHCoefficients[i * Scene.SHCoefficientsCount + Scene.SHCoefficientsCount - 1][0],
+			       Scene.GaussianSHCoefficients[i * Scene.SHCoefficientsCount + Scene.SHCoefficientsCount - 1][1],
+			       Scene.GaussianSHCoefficients[i * Scene.SHCoefficientsCount + Scene.SHCoefficientsCount - 1][2]);
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("Successfully read %d Gaussians from PLY file."), Scene.Gaussians.Num());
+		UE_LOG(LogTemp, Log, TEXT("Successfully read %d Gaussians from PLY file."), Scene.GaussianCount);
 	}
 	catch (const std::exception& e)
 	{
@@ -184,28 +187,28 @@ void FSceneManager::CreateActorInContentBrowser(const FString& SceneBufferAssetP
 	// 创建一个蓝图，基类是 ASceneActor，这样可以保存成一个正常的资产
 	UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(
 		ASceneActor::StaticClass(), // 基类
-		CreatePackage(*PackageName),
+		Package,
 		*Name,
 		EBlueprintType::BPTYPE_Normal,
 		UBlueprint::StaticClass(),
 		UBlueprintGeneratedClass::StaticClass()
 	);
 
-	// 为蓝图基类中的属性赋值
-	ASceneActor* SceneActor = Blueprint->GeneratedClass->GetDefaultObject<ASceneActor>();
-	SceneActor->SceneNiagaraInterface = NewObject<USceneNiagaraInterface>(SceneActor);
-	SceneActor->SceneNiagaraInterface->SceneBufferAsset = TSoftObjectPtr<USceneBufferAsset>(
-		FSoftObjectPath(SceneBufferAssetPath));
-
-	// 注册资产
 	FAssetRegistryModule::AssetCreated(Blueprint);
 	[[maybe_unused]] bool Suppressed = Package->MarkPackageDirty();
 
-	// 保存资产到包
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-	SaveArgs.SaveFlags = SAVE_NoError;
+	// 为蓝图基类中的属性赋值
+	ASceneActor* SceneActor = Blueprint->GeneratedClass->GetDefaultObject<ASceneActor>();
+	SceneActor->SceneNiagaraParameter = NewObject<USceneNiagaraParameter>();
 
-	UPackage::SavePackage(Package, SceneActor, *PackageFilename, SaveArgs);
-	UE_LOG(LogTemp, Log, TEXT("Created Scene Actor asset at: %s"), *PackageFilename);
+	// 编译蓝图
+	FCompilerResultsLog Results;
+	const FBPCompileRequest Request(Blueprint, EBlueprintCompileOptions::None, &Results);
+	FBlueprintCompilationManager::CompileSynchronously(Request);
+
+	// 保存蓝图资产
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	TArray<UPackage*> PackagesToSave;
+	PackagesToSave.Add(Blueprint->GetPackage());
+	UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
 }

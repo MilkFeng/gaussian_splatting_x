@@ -1,0 +1,6 @@
+﻿Buffer<float3> {ParameterName}_Positions;
+
+void GetGaussianData_{ParameterName}(in int In_Index, out float3 OutPosition)
+{
+	OutPosition = {ParameterName}_Positions[In_Index];
+}
