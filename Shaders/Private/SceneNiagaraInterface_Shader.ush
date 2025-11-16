@@ -1,6 +1,11 @@
-﻿Buffer<float3> {ParameterName}_Positions;
+﻿Buffer<float4> {ParameterName}_GaussianPositionBuffer;
+int {ParameterName}_GaussianCount;
 
-void GetGaussianData_{ParameterName}(in int In_Index, out float3 OutPosition)
+void {GetGaussianDataName}_{ParameterName}(out float4 OutPosition, out int OutIndex)
 {
-	OutPosition = {ParameterName}_Positions[In_Index];
+	int GaussianCount = {ParameterName}_GaussianCount;
+	int Index = ExecIndex() % GaussianCount;
+	
+	OutPosition = {ParameterName}_GaussianPositionBuffer[Index];
+	OutIndex = Index;
 }

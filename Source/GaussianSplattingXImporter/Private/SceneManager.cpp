@@ -3,7 +3,6 @@
 #include <format>
 #include <fstream>
 
-#include "BlueprintCompilationManager.h"
 #include "FileHelpers.h"
 #include "SceneActor.h"
 #include "tinyply.h"

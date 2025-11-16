@@ -6,6 +6,7 @@
 #include "NiagaraRenderer.h"
 #include "NiagaraShaderParametersBuilder.h"
 #include "NiagaraSystemInstance.h"
+#include "SceneBufferAsset.h"
 
 const FName USceneNiagaraInterface::GetGaussianCountName = TEXT("GetGaussianCount");
 const FName USceneNiagaraInterface::GetGaussianDataName = TEXT("GetGaussianData");
@@ -15,7 +16,6 @@ const FString USceneNiagaraInterface::GetGaussianCountShaderFile = TEXT(
 // the struct used to store our data interface data
 struct FNDIGaussianInstanceData
 {
-	FVector Position;
 };
 
 // this proxy is used to safely copy data between game thread and render thread
@@ -71,13 +71,14 @@ struct FNDIGaussianProxy : public FNiagaraDataInterfaceProxy
 			[this](FRHICommandListImmediate& RHICmdList)
 			{
 				{
-					const size_t BufferSize = SceneBufferAsset->GaussianCount * sizeof(FVector);
+					const size_t BufferSize = SceneBufferAsset->GaussianCount * sizeof(FGaussianPositionType);
 
 					// 初始化 Buffer
 					if (BufferSize > 0 && !GaussianPositionBuffer.NumBytes)
 					{
-						GaussianPositionBuffer.Initialize(RHICmdList, TEXT("PositionBuffer"), sizeof(FVector),
-						                                  SceneBufferAsset->GaussianCount, PF_R32G32B32F,
+						GaussianPositionBuffer.Initialize(RHICmdList, TEXT("PositionBuffer"),
+						                                  sizeof(FGaussianPositionType),
+						                                  SceneBufferAsset->GaussianCount, PF_A32B32G32R32F,
 						                                  BUF_Static);
 					}
 
@@ -105,6 +106,11 @@ struct FNDIGaussianProxy : public FNiagaraDataInterfaceProxy
 	bool IsValid() const
 	{
 		return SceneBufferAsset.IsValid();
+	}
+
+	uint32 GetGaussianCount() const
+	{
+		return SceneBufferAsset.IsValid() ? SceneBufferAsset->GaussianCount : 0;
 	}
 
 	TMap<FNiagaraSystemInstanceID, FNDIGaussianInstanceData> SystemInstancesToInstanceData_RT;
@@ -153,8 +159,8 @@ void USceneNiagaraInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignatu
 		Sig.bSupportsGPU = true;
 		Sig.ModuleUsageBitmask = ENiagaraScriptUsageMask::Particle;
 		Sig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition(GetClass()), TEXT("Scene Niagara Data Interface")));
-		Sig.AddInput(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Index")));
 		Sig.AddOutput(FNiagaraVariable(FNiagaraTypeDefinition::GetVec4Def(), TEXT("Position")));
+		Sig.AddOutput(FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(), TEXT("Index")));
 		OutFunctions.Add(Sig);
 	}
 
@@ -247,6 +253,7 @@ void USceneNiagaraInterface::GetParameterDefinitionHLSL(const FNiagaraDataInterf
 {
 	const TMap<FString, FStringFormatArg> TemplateArgs = {
 		{TEXT("ParameterName"), ParamInfo.DataInterfaceHLSLSymbol},
+		{TEXT("GetGaussianDataName"), FStringFormatArg(GetGaussianDataName.ToString())},
 	};
 	AppendTemplateHLSL(OutHLSL, *GetGaussianCountShaderFile, TemplateArgs);
 }
@@ -265,8 +272,9 @@ void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetS
 	FShaderParameters* ShaderParameters = Context.GetParameterNestedStruct<FShaderParameters>();
 
 	DataInterfaceProxy.PostSRV();
-	ShaderParameters->PositionBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
+	ShaderParameters->GaussianPositionBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
 		DataInterfaceProxy.GaussianPositionBuffer.SRV);
+	ShaderParameters->GaussianCount = DataInterfaceProxy.GetGaussianCount();
 }
 
 int USceneNiagaraInterface::PerInstanceDataSize() const
@@ -278,7 +286,6 @@ bool USceneNiagaraInterface::InitPerInstanceData(void* PerInstanceData, FNiagara
 {
 	FNDIGaussianProxy* DataInterfaceProxy = GetProxyAs<FNDIGaussianProxy>();
 	FNDIGaussianInstanceData* InstanceData = new(PerInstanceData) FNDIGaussianInstanceData();
-	InstanceData->Position = FVector::ZeroVector;
 
 	const FNiagaraUserRedirectionParameterStore* Store = SystemInstance->GetOverrideParameters();
 	TArray<FNiagaraVariable> OutParameters;
@@ -289,25 +296,18 @@ bool USceneNiagaraInterface::InitPerInstanceData(void* PerInstanceData, FNiagara
 		       TEXT("USceneNiagaraInterface::InitPerInstanceData - User Parameter: %s, Type: %s"),
 		       *Var.GetName().ToString(), *Var.GetType().GetName());
 	}
-	UObject* Object = Store->GetUObject(UserParameterBinding.Parameter);
-	if (Object)
-	{
-		UE_LOG(LogTemp, Log,
-		       TEXT("USceneNiagaraInterface::InitPerInstanceData - Found bound object: %s, Type: %s"),
-		       *Object->GetName(), *Object->GetClass()->GetName());
-	} else
-	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("USceneNiagaraInterface::InitPerInstanceData - No object bound to User Parameter: %s"),
-		       *UserParameterBinding.Parameter.GetName().ToString());
-	}
-	const USceneNiagaraParameter* NiagaraParameter = Cast<USceneNiagaraParameter>(Object);
+	const USceneNiagaraParameter* NiagaraParameter = Cast<USceneNiagaraParameter>(
+		Store->GetUObject(UserParameterBinding.Parameter));
 	if (NiagaraParameter)
 	{
-		UE_LOG(LogTemp, Log,
-		       TEXT("USceneNiagaraInterface::InitPerInstanceData - Loading SceneBufferAsset from path: %s"),
-		       *NiagaraParameter->SceneBufferAssetPath.ToString());
 		DataInterfaceProxy->LoadSceneBufferAsset(NiagaraParameter->SceneBufferAssetPath);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT(
+			       "USceneNiagaraInterface::InitPerInstanceData - Failed to get User.SceneNiagaraParameter from User Parameters"
+		       ));
 	}
 	return true;
 }
