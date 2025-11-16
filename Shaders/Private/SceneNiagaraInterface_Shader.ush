@@ -1,5 +1,8 @@
-﻿Buffer<float4> {ParameterName}_GaussianPositionBuffer;
-int {ParameterName}_GaussianCount;
+﻿int {ParameterName}_GaussianCount;
+int {ParameterName}_SHCoefficientsCount;
+
+Buffer<float4> {ParameterName}_GaussianPositionBuffer;
+Buffer<float4> {ParameterName}_GaussianSHCoefficientsBuffer;
 
 void {GetGaussianDataName}_{ParameterName}(out float4 OutPosition, out int OutIndex)
 {

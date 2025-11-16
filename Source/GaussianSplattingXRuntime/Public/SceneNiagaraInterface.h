@@ -7,8 +7,6 @@
 
 #include "SceneNiagaraInterface.generated.h"
 
-using FGaussianPositionType = FVector4f;
-
 /// 在 Niagara 中，不能直接使用 USceneBufferAsset 资源，需要通过 UNiagaraDataInterface 来桥接
 /// 它会暴露一些函数，把数据从 CPU 传递到 GPU 上的 Niagara 系统中
 UCLASS()
@@ -26,7 +24,9 @@ private:
 	// =============================== 暴露给 HLSL（GPU）的数据结构 ===============================
 	BEGIN_SHADER_PARAMETER_STRUCT(FShaderParameters,)
 		SHADER_PARAMETER(int, GaussianCount)
-		SHADER_PARAMETER_SRV(Buffer<FGaussianPositionType>, GaussianPositionBuffer)
+		SHADER_PARAMETER(int, SHCoefficientsCount)
+		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianPositionBuffer)
+		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianSHCoefficientsBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 protected:

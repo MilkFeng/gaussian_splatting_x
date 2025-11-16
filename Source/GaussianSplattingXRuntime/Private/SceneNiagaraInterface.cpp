@@ -71,13 +71,13 @@ struct FNDIGaussianProxy : public FNiagaraDataInterfaceProxy
 			[this](FRHICommandListImmediate& RHICmdList)
 			{
 				{
-					const size_t BufferSize = SceneBufferAsset->GaussianCount * sizeof(FGaussianPositionType);
+					const size_t BufferSize = SceneBufferAsset->GaussianCount * sizeof(FVector4f);
 
 					// 初始化 Buffer
 					if (BufferSize > 0 && !GaussianPositionBuffer.NumBytes)
 					{
 						GaussianPositionBuffer.Initialize(RHICmdList, TEXT("PositionBuffer"),
-						                                  sizeof(FGaussianPositionType),
+						                                  sizeof(FVector4f),
 						                                  SceneBufferAsset->GaussianCount, PF_A32B32G32R32F,
 						                                  BUF_Static);
 					}
@@ -88,8 +88,47 @@ struct FNDIGaussianProxy : public FNiagaraDataInterfaceProxy
 						// 上锁，准备写入数据
 						float* MappedData = static_cast<float*>(
 							RHICmdList.LockBuffer(GaussianPositionBuffer.Buffer, 0, BufferSize, RLM_WriteOnly));
-						FPlatformMemory::Memcpy(MappedData, &SceneBufferAsset->GaussianPositions, BufferSize);
+						// 先将 Vector3 转换成 Vector4，再复制到 GPU Buffer
+						for (size_t i = 0; i < SceneBufferAsset->GaussianCount; ++i)
+						{
+							const FVector& Position = SceneBufferAsset->GaussianPositions[i];
+							MappedData[i * 4 + 0] = Position.X;
+							MappedData[i * 4 + 1] = Position.Y;
+							MappedData[i * 4 + 2] = Position.Z;
+							MappedData[i * 4 + 3] = 1.0f; // padding
+						}
 						RHICmdList.UnlockBuffer(GaussianPositionBuffer.Buffer);
+					}
+				}
+				{
+					const size_t TotalSHCoefficientsCount = SceneBufferAsset->GaussianCount * SceneBufferAsset->
+						SHCoefficientsCount;
+
+					const size_t BufferSize = TotalSHCoefficientsCount * sizeof(FVector4f);
+
+					if (BufferSize > 0 && !GaussianSHCoefficientsBuffer.NumBytes)
+					{
+						GaussianSHCoefficientsBuffer.Initialize(RHICmdList, TEXT("SHCoefficientsBuffer"),
+						                                        sizeof(FVector4f),
+						                                        TotalSHCoefficientsCount, PF_A32B32G32R32F,
+						                                        BUF_Static);
+					}
+
+					if (GaussianSHCoefficientsBuffer.NumBytes > 0)
+					{
+						// 上锁，准备写入数据
+						float* MappedData = static_cast<float*>(
+							RHICmdList.LockBuffer(GaussianSHCoefficientsBuffer.Buffer, 0, BufferSize,
+							                      RLM_WriteOnly));
+						for (size_t i = 0; i < TotalSHCoefficientsCount; ++i)
+						{
+							const FVector& Position = SceneBufferAsset->GaussianSHCoefficients[i];
+							MappedData[i * 4 + 0] = Position.X;
+							MappedData[i * 4 + 1] = Position.Y;
+							MappedData[i * 4 + 2] = Position.Z;
+							MappedData[i * 4 + 3] = 1.0f; // padding
+						}
+						RHICmdList.UnlockBuffer(GaussianSHCoefficientsBuffer.Buffer);
 					}
 				}
 
@@ -108,15 +147,21 @@ struct FNDIGaussianProxy : public FNiagaraDataInterfaceProxy
 		return SceneBufferAsset.IsValid();
 	}
 
-	uint32 GetGaussianCount() const
+	size_t GetGaussianCount() const
 	{
 		return SceneBufferAsset.IsValid() ? SceneBufferAsset->GaussianCount : 0;
+	}
+
+	size_t GetSHCoefficientsCount() const
+	{
+		return SceneBufferAsset.IsValid() ? SceneBufferAsset->SHCoefficientsCount : 0;
 	}
 
 	TMap<FNiagaraSystemInstanceID, FNDIGaussianInstanceData> SystemInstancesToInstanceData_RT;
 
 	// =============================== Buffer ===============================
 	FReadBuffer GaussianPositionBuffer;
+	FReadBuffer GaussianSHCoefficientsBuffer;
 
 private:
 	TSoftObjectPtr<USceneBufferAsset> SceneBufferAsset;
@@ -272,9 +317,12 @@ void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetS
 	FShaderParameters* ShaderParameters = Context.GetParameterNestedStruct<FShaderParameters>();
 
 	DataInterfaceProxy.PostSRV();
+	ShaderParameters->GaussianCount = DataInterfaceProxy.GetGaussianCount();
+	ShaderParameters->SHCoefficientsCount = DataInterfaceProxy.GetSHCoefficientsCount();
 	ShaderParameters->GaussianPositionBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
 		DataInterfaceProxy.GaussianPositionBuffer.SRV);
-	ShaderParameters->GaussianCount = DataInterfaceProxy.GetGaussianCount();
+	ShaderParameters->GaussianSHCoefficientsBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
+		DataInterfaceProxy.GaussianSHCoefficientsBuffer.SRV);
 }
 
 int USceneNiagaraInterface::PerInstanceDataSize() const
