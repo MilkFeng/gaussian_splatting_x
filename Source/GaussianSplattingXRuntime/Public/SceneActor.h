@@ -12,7 +12,6 @@ class GAUSSIANSPLATTINGXRUNTIME_API ASceneActor : public AActor
 	GENERATED_BODY()
 
 public:
-	// Niagara Data Interface
 	UPROPERTY(EditAnywhere)
 	TObjectPtr<USceneNiagaraParameter> SceneNiagaraParameter;
 
@@ -24,5 +23,5 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 
-	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 };

@@ -199,16 +199,18 @@ void FSceneManager::CreateActorInContentBrowser(const FString& SceneBufferAssetP
 
 	// 为蓝图基类中的属性赋值
 	ASceneActor* SceneActor = Blueprint->GeneratedClass->GetDefaultObject<ASceneActor>();
-	SceneActor->SceneNiagaraParameter = NewObject<USceneNiagaraParameter>();
+	// 注意这里要指定 Outer 为 Blueprint，让它成为蓝图资产的一部分，不然保存不了
+	SceneActor->SceneNiagaraParameter = NewObject<USceneNiagaraParameter>(
+		Blueprint,
+		USceneNiagaraParameter::StaticClass(),
+		TEXT("SceneNiagaraParameter"),
+		RF_Public | RF_Standalone);
+	SceneActor->SceneNiagaraParameter.Get()->SceneBufferAssetPath = FSoftObjectPath(SceneBufferAssetPath);
 
 	// 编译蓝图
-	FCompilerResultsLog Results;
-	const FBPCompileRequest Request(Blueprint, EBlueprintCompileOptions::None, &Results);
-	FBlueprintCompilationManager::CompileSynchronously(Request);
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
 
 	// 保存蓝图资产
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
-	TArray<UPackage*> PackagesToSave;
-	PackagesToSave.Add(Blueprint->GetPackage());
-	UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
+	UEditorLoadingAndSavingUtils::SavePackages({Package}, true);
 }
