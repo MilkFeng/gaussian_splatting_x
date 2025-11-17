@@ -1,13 +1,27 @@
-﻿int {ParameterName}_GaussianCount;
+﻿#include "/Plugin/GaussianSplattingX/Private/SceneNiagaraInterface_Utils.ush"
+
+int {ParameterName}_GaussianCount;
 int {ParameterName}_SHCoefficientsCount;
+float4x4 {ParameterName}_ActorTransformMatrixInCamera;
 
 Buffer<float4> {ParameterName}_GaussianPositionBuffer;
 Buffer<float4> {ParameterName}_GaussianSHCoefficientsBuffer;
 
-void {GetGaussianDataName}_{ParameterName}(out float4 OutPosition, out int OutIndex)
+void {GetGaussianDataName}_{ParameterName}(out float4 OutPosition, out int OutIndex, out float3 OutColor)
 {
 	int GaussianCount = {ParameterName}_GaussianCount;
 	int Index = ExecIndex() % GaussianCount;
+
+	float4x4 ActorTransform = {ParameterName}_ActorTransformMatrixInCamera;
+	float4 GaussianPositionInActor = {ParameterName}_GaussianPositionBuffer[Index];
+	GaussianPositionInActor[3] = 1.0;
+	float4 GaussianPositionInCamera = mul(GaussianPositionInActor, ActorTransform);
+	
+	CalculateGaussianColor(Index,
+		GaussianPositionInCamera.xyz,
+		{ParameterName}_SHCoefficientsCount,
+		{ParameterName}_GaussianSHCoefficientsBuffer,
+		OutColor);
 	
 	OutPosition = {ParameterName}_GaussianPositionBuffer[Index];
 	OutIndex = Index;

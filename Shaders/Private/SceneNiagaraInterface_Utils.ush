@@ -1,0 +1,74 @@
+﻿#ifndef GAUSSIAN_UTILS_USH
+#define GAUSSIAN_UTILS_USH
+
+const float SH_C0 = 0.28209479177387814f;
+const float SH_C1 = 0.4886025119029199f;
+const float SH_C2[] = {
+	1.0925484305920792f,
+	-1.0925484305920792f,
+	0.31539156525252005f,
+	-1.0925484305920792f,
+	0.5462742152960396f
+};
+const float SH_C3[] = {
+	-0.5900435899266435f,
+	2.890611442640554f,
+	-0.4570457994644658f,
+	0.3731763325901154f,
+	-0.4570457994644658f,
+	1.445305721320277f,
+	-0.5900435899266435f
+};
+
+void CalculateGaussianColor(
+	in int InIndex,
+	in float3 InDirection,
+	in int InSHCoefficientsCount,
+	in Buffer<float4> InGaussianSHCoefficientsBuffer,
+	out float3 OutColor)
+{
+#define SH InGaussianSHCoefficientsBuffer
+	int Offset = InIndex * InSHCoefficientsCount;
+	float3 Direction = normalize(InDirection);
+
+	// 0 阶 1
+	float4 Result = SH_C0 * SH[Offset + 0];
+	if (InSHCoefficientsCount >= 4)
+	{
+		// 1 阶 1 + 3
+		float x = Direction.x;
+		float y = Direction.y;
+		float z = Direction.z;
+		Result = Result - SH_C1 * y * SH[Offset + 1] + SH_C1 * z * SH[Offset + 2] - SH_C1 * x * SH[Offset + 3];
+
+		if (InSHCoefficientsCount >= 9)
+		{
+			// 2 阶 1 + 3 + 5
+			float xx = x * x, yy = y * y, zz = z * z;
+			float xy = x * y, yz = y * z, xz = x * z;
+			Result = Result +
+				SH_C2[0] * xy * SH[Offset + 4] +
+				SH_C2[1] * yz * SH[Offset + 5] +
+				SH_C2[2] * (2.0f * zz - xx - yy) * SH[Offset + 6] +
+				SH_C2[3] * xz * SH[Offset + 7] +
+				SH_C2[4] * (xx - yy) * SH[Offset + 8];
+
+			if (InSHCoefficientsCount >= 16)
+			{
+				// 3 阶 1 + 3 + 5 + 7
+				Result = Result +
+					SH_C3[0] * y * (3.0f * xx - yy) * SH[Offset + 9] +
+					SH_C3[1] * xy * z * SH[Offset + 10] +
+					SH_C3[2] * y * (4.0f * zz - xx - yy) * SH[Offset + 11] +
+					SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * SH[Offset + 12] +
+					SH_C3[4] * x * (4.0f * zz - xx - yy) * SH[Offset + 13] +
+					SH_C3[5] * z * (xx - yy) * SH[Offset + 14] +
+					SH_C3[6] * x * (xx - 3.0f * yy) * SH[Offset + 15];
+			}
+		}
+	}
+	OutColor = Result.xyz;
+#undef SH
+}
+
+#endif

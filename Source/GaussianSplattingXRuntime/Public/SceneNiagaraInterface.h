@@ -25,12 +25,14 @@ private:
 	BEGIN_SHADER_PARAMETER_STRUCT(FShaderParameters,)
 		SHADER_PARAMETER(int, GaussianCount)
 		SHADER_PARAMETER(int, SHCoefficientsCount)
+		SHADER_PARAMETER(FMatrix44f, ActorTransformMatrixInCamera)
 		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianPositionBuffer)
 		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianSHCoefficientsBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 protected:
 	// ============================== 定义 VM（CPU）和 HLSL（GPU）的所有函数接口 ===============================
+	// note: 如果一个函数是 MemberFunction，那么也可以访问 DataInterface 的变量（VM），或者访问 ShaderParameters（HLSL）
 #if WITH_EDITORONLY_DATA
 	virtual void GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const override;
 #endif
@@ -46,14 +48,14 @@ public:
 
 	// =============================== Niagara Data Interface 的配置 ===============================
 	virtual bool CanExecuteOnTarget(ENiagaraSimTarget Target) const override;
-	/// 如果设置了 MemberFunction，那么 Niagara 会将对象复制到 Render Thread 中
-	/// 如果不实现这个函数，默认的浅拷贝可能会导致 Render Thread 对象不存在正确的 SceneBufferAsset
+	/// 如果设置了 MemberFunction，那么 Niagara 会将当前的 Niagara Data Interface 对象复制到 Render Thread 中
 	virtual bool CopyToInternal(UNiagaraDataInterface* Destination) const override;
 	/// 用于比较两个 Data Interface 是否相等，决定是否需要重新编译 Niagara 系统或者重新传递数据
 	virtual bool Equals(const UNiagaraDataInterface* Other) const override;
 
 	// =============================== HLSL（GPU）接口 Bridge ===============================
 	// note: 如果函数不是 MemberFunction，那么无法访问 ShaderParameters
+	// note: SetShaderParameters 在 RT 上执行
 #if WITH_EDITORONLY_DATA
 	virtual bool AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const override;
 	virtual bool GetFunctionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
@@ -66,9 +68,9 @@ public:
 	/// 将数据传递给 GPU，从 InstanceData 读出数据，根据 FShaderParameters 结构体的定义，传给 GPU
 	virtual void SetShaderParameters(const FNiagaraDataInterfaceSetShaderParametersContext& Context) const override;
 
-	// =============================== 数据接口，用于向 VM（CPU）和 HLSL（GPU）传输数据 ===============================
-	// note: InstanceData 是每一个实例携带的数据，一个示例可以对应一个 Emitter，也可以对应一个 Particle
-	// note: 如果一个函数是 MemberFunction，那么也可以访问 DataInterface 的变量（VM），或者访问 ShaderParameters（HLSL）
+	// =============================== Niagara System 的数据接口 ===============================
+	// note: InstanceData 是每一个 System 携带的数据（Emitter、Particle 并没有）
+	// note: 除了 ProvidePerInstanceDataForRenderThread 负责将数据传递给 RT 外，其他函数都在 GT 上执行
 	virtual int PerInstanceDataSize() const override;
 	virtual bool InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance) override;
 	virtual bool PerInstanceTick(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance,
@@ -84,11 +86,15 @@ public:
 
 private:
 	// ============================== VM（CPU）实现 ===============================
-	// note: VM 也需要从 InstanceData 读取数据
+	// note: 都会在 RT 上执行
 	void GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const;
+
+	// ============================== 辅助函数 ===============================
+	FTransform GetCameraTransform() const;
+	FTransform GetActorTransformInCamera(FNiagaraSystemInstance* SystemInstance) const;
 
 private:
 	static const FName GetGaussianCountName;
 	static const FName GetGaussianDataName;
-	static const FString GetGaussianCountShaderFile;
+	static const FString GaussianShaderFile;
 };

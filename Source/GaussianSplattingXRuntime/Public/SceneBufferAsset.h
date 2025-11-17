@@ -11,12 +11,12 @@ class GAUSSIANSPLATTINGXRUNTIME_API USceneBufferAsset : public UObject
 
 public:
 	// =============================== 全局参数 ===============================
-	UPROPERTY()
 	/// 球谐函数的维度
+	UPROPERTY()
 	uint32 SHDim = {};
 
-	UPROPERTY()
 	/// 球谐函数系数的数量，等于 (SHDim-1)^2
+	UPROPERTY()
 	uint32 SHCoefficientsCount = {};
 
 	UPROPERTY()
@@ -35,10 +35,9 @@ public:
 	UPROPERTY()
 	TArray<float> GaussianOpacities = {};
 
-	UPROPERTY()
 	/// 展开的 SH 系数数组，长度为 GaussianCount * SHCoefficientsCount
+	UPROPERTY()
 	TArray<FVector> GaussianSHCoefficients = {};
-
 
 	void SetGaussianCount(size_t NewGaussianCount);
 };

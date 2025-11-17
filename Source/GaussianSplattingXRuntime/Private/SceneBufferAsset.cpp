@@ -1,5 +1,7 @@
 ﻿#include "SceneBufferAsset.h"
 
+#include "Serialization/ArchiveCrc32.h"
+
 void USceneBufferAsset::SetGaussianCount(const size_t NewGaussianCount)
 {
 	GaussianCount = NewGaussianCount;
