@@ -1,16 +1,16 @@
 ﻿#ifndef GAUSSIAN_UTILS_USH
 #define GAUSSIAN_UTILS_USH
 
-const float SH_C0 = 0.28209479177387814f;
-const float SH_C1 = 0.4886025119029199f;
-const float SH_C2[] = {
+static const float SH_C0 = 0.28209479177387814f;
+static const float SH_C1 = 0.4886025119029199f;
+static const float SH_C2[] = {
 	1.0925484305920792f,
 	-1.0925484305920792f,
 	0.31539156525252005f,
 	-1.0925484305920792f,
 	0.5462742152960396f
 };
-const float SH_C3[] = {
+static const float SH_C3[] = {
 	-0.5900435899266435f,
 	2.890611442640554f,
 	-0.4570457994644658f,
@@ -40,7 +40,7 @@ void CalculateGaussianColor(
 		float y = Direction.y;
 		float z = Direction.z;
 		Result = Result - SH_C1 * y * SH[Offset + 1] + SH_C1 * z * SH[Offset + 2] - SH_C1 * x * SH[Offset + 3];
-
+	
 		if (InSHCoefficientsCount >= 9)
 		{
 			// 2 阶 1 + 3 + 5
@@ -52,7 +52,7 @@ void CalculateGaussianColor(
 				SH_C2[2] * (2.0f * zz - xx - yy) * SH[Offset + 6] +
 				SH_C2[3] * xz * SH[Offset + 7] +
 				SH_C2[4] * (xx - yy) * SH[Offset + 8];
-
+	
 			if (InSHCoefficientsCount >= 16)
 			{
 				// 3 阶 1 + 3 + 5 + 7
@@ -67,7 +67,7 @@ void CalculateGaussianColor(
 			}
 		}
 	}
-	OutColor = Result.xyz;
+	OutColor = clamp(Result.xyz, 0.0f, 1.0f);
 #undef SH
 }
 

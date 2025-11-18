@@ -1,4 +1,6 @@
 ﻿#include "SceneNiagaraInterface.h"
+
+#include "LevelEditorViewport.h"
 #include "SceneActor.h"
 
 #include "NiagaraCompileHashVisitor.h"
@@ -7,6 +9,7 @@
 #include "NiagaraShaderParametersBuilder.h"
 #include "NiagaraSystemInstance.h"
 #include "SceneBufferAsset.h"
+#include "Camera/CameraComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 const FName USceneNiagaraInterface::GetGaussianCountName = TEXT("GetGaussianCount");
@@ -93,9 +96,6 @@ public:
 		FNDIGaussianInstanceData* InstanceDataFromGT = static_cast<FNDIGaussianInstanceData*>(
 			PerInstanceData);
 		FNDIGaussianInstanceData& InstanceData = SystemInstancesToInstanceData_RT.FindOrAdd(InstanceID);
-		if (InstanceDataFromGT->SceneBufferAsset != InstanceData.SceneBufferAsset)
-		{
-		}
 		InstanceData = *InstanceDataFromGT;
 
 		// we call the destructor here to clean up the GT data. Without this we could be leaking memory.
@@ -112,8 +112,11 @@ public:
 		SystemInstancesToInstanceData_RT.Remove(InstanceID);
 	}
 
-	void PostSRV(const USceneBufferAsset& SceneBufferAsset)
+	void PostSRV(const FNiagaraSystemInstanceID& InstanceID)
 	{
+		const FNDIGaussianInstanceData& InstanceData = GetInstanceData_RT(InstanceID);
+		const USceneBufferAsset& SceneBufferAsset = InstanceData.GetSceneBufferAsset();
+
 		ENQUEUE_RENDER_COMMAND(FUpdateGaussianBuffer)(
 			[this, &SceneBufferAsset](FRHICommandListImmediate& RHICmdList)
 			{
@@ -344,7 +347,7 @@ void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetS
 	// 将 SceneBufferAsset 的数据上传到 GPU Buffer
 	if (InstanceData.SceneBufferAsset.IsValid())
 	{
-		DataInterfaceProxy.PostSRV(*InstanceData.SceneBufferAsset.Get());
+		DataInterfaceProxy.PostSRV(Context.GetSystemInstanceID());
 	}
 	ShaderParameters->GaussianCount = InstanceData.GetGaussianCount();
 	ShaderParameters->SHCoefficientsCount = InstanceData.GetSHCoefficientsCount();
@@ -357,26 +360,12 @@ void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetS
 	ShaderParameters->ActorTransformMatrixInCamera = FMatrix44f(
 		InstanceData.TransformInCamera.ToMatrixWithScale());
 
-	UE_LOG(LogTemp, Error,
-	       TEXT(
-		       "USceneNiagaraInterface::SetShaderParameters - Update TransformInCamera Matrix [%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f]"
+	UE_LOG(LogTemp, Log,
+	       TEXT("USceneNiagaraInterface::SetShaderParameters - Set Shader Parameters: ActorTransformMatrixInCamera=%s, GaussianCount=%d, SHCoefficientsCount=%d"
 	       ),
-	       ShaderParameters->ActorTransformMatrixInCamera.M[0][0],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[0][1],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[0][2],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[0][3],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[1][0],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[1][1],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[1][2],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[1][3],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[2][0],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[2][1],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[2][2],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[2][3],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[3][0],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[3][1],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[3][2],
-	       ShaderParameters->ActorTransformMatrixInCamera.M[3][3]);
+	       *ShaderParameters->ActorTransformMatrixInCamera.ToString(),
+	       ShaderParameters->GaussianCount,
+	       ShaderParameters->SHCoefficientsCount);
 }
 
 int USceneNiagaraInterface::PerInstanceDataSize() const
@@ -418,10 +407,6 @@ bool USceneNiagaraInterface::PerInstanceTick(void* PerInstanceData, FNiagaraSyst
 	{
 		return true;
 	}
-
-	UE_LOG(LogTemp, Error,
-	       TEXT("USceneNiagaraInterface::PerInstanceTick - Ticking System Instance ID: %llu"),
-	       SystemInstance->GetId());
 
 	// 得到当前 System 对象相对于相机的 Transform
 	InstanceData->TransformInCamera = GetActorTransformInCamera(SystemInstance);
@@ -482,64 +467,58 @@ void USceneNiagaraInterface::GetGaussianCountVM(FVectorVMExternalFunctionContext
 	}
 }
 
-FTransform USceneNiagaraInterface::GetCameraTransform() const
+FTransform USceneNiagaraInterface::GetCameraTransform(FNiagaraSystemInstance* SystemInstance) const
 {
-	const UWorld* World = GetWorld();
-	if (World == nullptr)
+	const UWorld* World = SystemInstance->GetWorld();
+	if (!World)
 	{
 		return FTransform::Identity;
 	}
 
-	if (World->WorldType == EWorldType::Game ||
-		World->WorldType == EWorldType::PIE ||
-		World->WorldType == EWorldType::GameRPC)
+	if (World->IsGameWorld())
 	{
-		if (const APlayerController* PC = World->GetFirstPlayerController())
+		const APlayerController* PC = World->GetFirstPlayerController();
+		if (PC && PC->PlayerCameraManager)
 		{
-			if (const APlayerCameraManager* CamMgr = PC->PlayerCameraManager)
+			UE_LOG(LogTemp, Log,
+			       TEXT(
+				       "USceneNiagaraInterface::GetCameraTransform - Found PlayerCameraManager: %s"
+			       ),
+			       *PC->PlayerCameraManager->GetName());
+			const APlayerCameraManager* CameraManager = PC->PlayerCameraManager;
+
+			const FVector CameraLocation = CameraManager->GetCameraLocation();
+			const FRotator CameraRotation = CameraManager->GetCameraRotation();
+
+			return FTransform(CameraRotation, CameraLocation);
+		}
+	}
+	else
+	{
+		for (const auto LevelVC : GEditor->GetLevelViewportClients())
+		{
+			if (LevelVC && LevelVC->IsPerspective())
 			{
-				return FTransform(CamMgr->GetCameraRotation(), CamMgr->GetCameraLocation());
+				UE_LOG(LogTemp, Log,
+				       TEXT(
+					       "USceneNiagaraInterface::GetCameraTransform - Found LevelEditorViewportClient"
+				       ));
+				const FVector CameraLocation = LevelVC->GetViewLocation();
+				const FRotator CameraRotation = LevelVC->GetViewRotation();
+
+				return FTransform(CameraRotation, CameraLocation);
 			}
 		}
 	}
-
-#if WITH_EDITOR
-	// =============================== Editor 世界（Viewport） ===============================
-	if (World->WorldType == EWorldType::Editor ||
-		World->WorldType == EWorldType::EditorPreview ||
-		World->WorldType == EWorldType::Inactive)
-	{
-		// 找到当前激活的 Editor 视口
-		for (const FEditorViewportClient* Client : GEditor->GetAllViewportClients())
-		{
-			if (Client && Client->Viewport && Client->Viewport->HasFocus())
-			{
-				const FVector CamLoc = Client->GetViewLocation();
-				const FRotator CamRot = Client->GetViewRotation();
-				return FTransform(CamRot, CamLoc);
-			}
-		}
-
-		// 如果没有焦点，就取最后一个 view client
-		for (const FEditorViewportClient* Client : GEditor->GetAllViewportClients())
-		{
-			if (Client)
-			{
-				const FVector CamLoc = Client->GetViewLocation();
-				const FRotator CamRot = Client->GetViewRotation();
-				return FTransform(CamRot, CamLoc);
-			}
-		}
-	}
-#endif
 
 	return FTransform::Identity;
 }
 
 FTransform USceneNiagaraInterface::GetActorTransformInCamera(FNiagaraSystemInstance* SystemInstance) const
 {
-	const FTransform CameraTransform = GetCameraTransform();
-	if (const AActor* Owner = SystemInstance->GetAttachComponent()->GetOwner())
+	const FTransform CameraTransform = GetCameraTransform(SystemInstance);
+	const AActor* Owner = SystemInstance->GetAttachComponent()->GetOwner();
+	if (Owner)
 	{
 		return Owner->GetActorTransform().GetRelativeTransform(CameraTransform);
 	}

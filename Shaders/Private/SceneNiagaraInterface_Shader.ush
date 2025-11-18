@@ -12,10 +12,10 @@ void {GetGaussianDataName}_{ParameterName}(out float4 OutPosition, out int OutIn
 	int GaussianCount = {ParameterName}_GaussianCount;
 	int Index = ExecIndex() % GaussianCount;
 
-	float4x4 ActorTransform = {ParameterName}_ActorTransformMatrixInCamera;
+	float4x4 ActorTransformMatrix = {ParameterName}_ActorTransformMatrixInCamera;
 	float4 GaussianPositionInActor = {ParameterName}_GaussianPositionBuffer[Index];
 	GaussianPositionInActor[3] = 1.0;
-	float4 GaussianPositionInCamera = mul(GaussianPositionInActor, ActorTransform);
+	float4 GaussianPositionInCamera = mul(ActorTransformMatrix, GaussianPositionInActor);
 	
 	CalculateGaussianColor(Index,
 		GaussianPositionInCamera.xyz,
@@ -23,6 +23,6 @@ void {GetGaussianDataName}_{ParameterName}(out float4 OutPosition, out int OutIn
 		{ParameterName}_GaussianSHCoefficientsBuffer,
 		OutColor);
 	
-	OutPosition = {ParameterName}_GaussianPositionBuffer[Index];
+	OutPosition = GaussianPositionInActor;
 	OutIndex = Index;
 }

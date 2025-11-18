@@ -90,7 +90,7 @@ private:
 	void GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const;
 
 	// ============================== 辅助函数 ===============================
-	FTransform GetCameraTransform() const;
+	FTransform GetCameraTransform(FNiagaraSystemInstance* SystemInstance) const;
 	FTransform GetActorTransformInCamera(FNiagaraSystemInstance* SystemInstance) const;
 
 private:
