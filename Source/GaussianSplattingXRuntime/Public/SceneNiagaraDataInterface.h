@@ -29,7 +29,7 @@ private:
 		SHADER_PARAMETER(FVector4f, CameraPosition)
 		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianPositionOpacityBuffer)
 		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianScaleBuffer)
-		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianRotationBuffer)
+		SHADER_PARAMETER_SRV(Buffer<FQuat4f>, GaussianRotationBuffer)
 		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianSHCoefficientsBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -93,7 +93,7 @@ private:
 	void GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const;
 
 	// ============================== 辅助函数 ===============================
-	FTransform GetCameraTransform(FNiagaraSystemInstance* SystemInstance) const;
+	FTransform GetCameraTransform(const FNiagaraSystemInstance* SystemInstance) const;
 	FTransform GetActorTransform(FNiagaraSystemInstance* SystemInstance) const;
 
 private:

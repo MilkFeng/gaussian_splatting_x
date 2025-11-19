@@ -28,23 +28,8 @@ struct FNDIGaussianInstanceData
 		SceneBufferAsset.LoadSynchronous();
 
 		UE_LOG(LogTemp, Log,
-		       TEXT("FNDIGaussianInstanceData::LoadSceneBufferAsset - Loaded SceneBufferAsset: %s"),
-		       *SceneBufferAssetPath.ToString());
-
-		UE_LOG(LogTemp, Log,
-		       TEXT("FNDIGaussianInstanceData::LoadSceneBufferAsset - GaussianCount: %d, SHCoefficientsCount: %d"),
-		       SceneBufferAsset->GaussianCount,
-		       SceneBufferAsset->SHCoefficientsCount);
-
-		if (SceneBufferAsset->GaussianCount > 0)
-		{
-			UE_LOG(LogTemp, Log,
-			       TEXT("FNDIGaussianInstanceData::LoadSceneBufferAsset - First Gaussian SH Coefficients: (%f, %f, %f)"
-			       ),
-			       SceneBufferAsset->GaussianSHCoefficients[0].X,
-			       SceneBufferAsset->GaussianSHCoefficients[0].Y,
-			       SceneBufferAsset->GaussianSHCoefficients[0].Z);
-		}
+		       TEXT("FNDIGaussianInstanceData::LoadSceneBufferAsset - Loaded SceneBufferAsset: %s, Valid: %d"),
+		       *SceneBufferAssetPath.ToString(), SceneBufferAsset.IsValid());
 	}
 
 	const USceneBufferAsset& GetSceneBufferAsset() const
@@ -393,21 +378,19 @@ bool USceneNiagaraDataInterface::InitPerInstanceData(void* PerInstanceData, FNia
 	FNDIGaussianInstanceData* InstanceData = new(PerInstanceData) FNDIGaussianInstanceData();
 
 	// 从 User Parameters 中获取 SceneNiagaraParameter，然后加载 SceneBufferAsset
+	const FNiagaraUserRedirectionParameterStore* Store = SystemInstance->GetOverrideParameters();
+	const USceneNiagaraParameter* NiagaraParameter = Cast<USceneNiagaraParameter>(
+		Store->GetUObject(UserParameterBinding.Parameter));
+	if (NiagaraParameter)
 	{
-		const FNiagaraUserRedirectionParameterStore* Store = SystemInstance->GetOverrideParameters();
-		const USceneNiagaraParameter* NiagaraParameter = Cast<USceneNiagaraParameter>(
-			Store->GetUObject(UserParameterBinding.Parameter));
-		if (NiagaraParameter)
-		{
-			InstanceData->LoadSceneBufferAsset(NiagaraParameter->SceneBufferAssetPath);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning,
-			       TEXT(
-				       "USceneNiagaraInterface::InitPerInstanceData - Failed to get User.SceneNiagaraParameter from User Parameters"
-			       ));
-		}
+		InstanceData->LoadSceneBufferAsset(NiagaraParameter->SceneBufferAssetPath);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT(
+			       "USceneNiagaraInterface::InitPerInstanceData - Failed to get User.SceneNiagaraParameter from User Parameters"
+		       ));
 	}
 	return true;
 }
@@ -483,7 +466,7 @@ void USceneNiagaraDataInterface::GetGaussianCountVM(FVectorVMExternalFunctionCon
 	}
 }
 
-FTransform USceneNiagaraDataInterface::GetCameraTransform(FNiagaraSystemInstance* SystemInstance) const
+FTransform USceneNiagaraDataInterface::GetCameraTransform(const FNiagaraSystemInstance* SystemInstance) const
 {
 	const UWorld* World = SystemInstance->GetWorld();
 	if (!World)
@@ -528,8 +511,7 @@ FTransform USceneNiagaraDataInterface::GetCameraTransform(FNiagaraSystemInstance
 
 FTransform USceneNiagaraDataInterface::GetActorTransform(FNiagaraSystemInstance* SystemInstance) const
 {
-	const AActor* Owner = SystemInstance->GetAttachComponent()->GetOwner();
-	if (Owner)
+	if (const AActor* Owner = SystemInstance->GetAttachComponent()->GetOwner())
 	{
 		return Owner->GetActorTransform();
 	}
