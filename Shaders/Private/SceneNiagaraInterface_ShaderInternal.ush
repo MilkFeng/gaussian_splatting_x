@@ -1,0 +1,34 @@
+﻿#ifndef GAUSSIAN_SHADER_INTERNAL_USH
+#define GAUSSIAN_SHADER_INTERNAL_USH
+
+#include "/Plugin/GaussianSplattingX/Private/SceneNiagaraInterface_Utils.ush"
+
+void GetGaussianDataInternal(
+	in int InGaussianCount,
+	in int InSHCoefficientsCount,
+	in float4x4 InActorTransformMatrix,
+	in float4 InCameraPosition,
+	in Buffer<float4> InGaussianPositionOpacityBuffer,
+	in Buffer<float4> InGaussianSHCoefficientsBuffer,
+
+	out float4 OutPosition,
+	out int OutIndex,
+	out float3 OutColor)
+{
+	int Index = ExecIndex() % InGaussianCount;
+
+	float4 GaussianPositionInActor = float4(InGaussianPositionOpacityBuffer[Index].xyz, 1.0);
+	float4 GaussianPosition = mul(InActorTransformMatrix, GaussianPositionInActor);
+	float4 DirectionToCamera = normalize(GaussianPosition - InCameraPosition);
+
+	CalculateGaussianColor(Index,
+	                       DirectionToCamera.xyz,
+	                       InSHCoefficientsCount,
+	                       InGaussianSHCoefficientsBuffer,
+	                       OutColor);
+
+	OutPosition = GaussianPositionInActor;
+	OutIndex = Index;
+}
+
+#endif

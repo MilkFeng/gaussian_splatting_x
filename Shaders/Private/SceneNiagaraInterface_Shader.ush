@@ -1,28 +1,26 @@
-﻿#include "/Plugin/GaussianSplattingX/Private/SceneNiagaraInterface_Utils.ush"
+﻿#include "/Plugin/GaussianSplattingX/Private/SceneNiagaraInterface_ShaderInternal.ush"
 
 int {ParameterName}_GaussianCount;
 int {ParameterName}_SHCoefficientsCount;
-float4x4 {ParameterName}_ActorTransformMatrixInCamera;
 
-Buffer<float4> {ParameterName}_GaussianPositionBuffer;
+float4x4 {ParameterName}_ActorTransformMatrix;
+float4 {ParameterName}_CameraPosition;
+
+Buffer<float4> {ParameterName}_GaussianPositionOpacityBuffer;
+Buffer<float4> {ParameterName}_GaussianRotationBuffer;
+Buffer<float4> {ParameterName}_GaussianScaleBuffer;
 Buffer<float4> {ParameterName}_GaussianSHCoefficientsBuffer;
 
 void {GetGaussianDataName}_{ParameterName}(out float4 OutPosition, out int OutIndex, out float3 OutColor)
 {
-	int GaussianCount = {ParameterName}_GaussianCount;
-	int Index = ExecIndex() % GaussianCount;
-
-	float4x4 ActorTransformMatrix = {ParameterName}_ActorTransformMatrixInCamera;
-	float4 GaussianPositionInActor = {ParameterName}_GaussianPositionBuffer[Index];
-	GaussianPositionInActor[3] = 1.0;
-	float4 GaussianPositionInCamera = mul(ActorTransformMatrix, GaussianPositionInActor);
-	
-	CalculateGaussianColor(Index,
-		GaussianPositionInCamera.xyz,
+	GetGaussianDataInternal(
+		{ParameterName}_GaussianCount,
 		{ParameterName}_SHCoefficientsCount,
+		{ParameterName}_ActorTransformMatrix,
+		{ParameterName}_CameraPosition,
+		{ParameterName}_GaussianPositionOpacityBuffer,
 		{ParameterName}_GaussianSHCoefficientsBuffer,
+		OutPosition,
+		OutIndex,
 		OutColor);
-	
-	OutPosition = GaussianPositionInActor;
-	OutIndex = Index;
 }

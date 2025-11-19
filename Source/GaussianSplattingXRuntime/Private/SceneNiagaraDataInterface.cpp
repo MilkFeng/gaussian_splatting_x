@@ -1,4 +1,4 @@
-﻿#include "SceneNiagaraInterface.h"
+﻿#include "SceneNiagaraDataInterface.h"
 
 #include "LevelEditorViewport.h"
 #include "SceneActor.h"
@@ -9,18 +9,18 @@
 #include "NiagaraShaderParametersBuilder.h"
 #include "NiagaraSystemInstance.h"
 #include "SceneBufferAsset.h"
-#include "Camera/CameraComponent.h"
-#include "Kismet/GameplayStatics.h"
 
-const FName USceneNiagaraInterface::GetGaussianCountName = TEXT("GetGaussianCount");
-const FName USceneNiagaraInterface::GetGaussianDataName = TEXT("GetGaussianData");
-const FString USceneNiagaraInterface::GaussianShaderFile = TEXT(
+const FName USceneNiagaraDataInterface::GetGaussianCountName = TEXT("GetGaussianCount");
+const FName USceneNiagaraDataInterface::GetGaussianDataName = TEXT("GetGaussianData");
+const FString USceneNiagaraDataInterface::GaussianShaderFile = TEXT(
 	"/Plugin/GaussianSplattingX/Private/SceneNiagaraInterface_Shader.ush");
 
 struct FNDIGaussianInstanceData
 {
 	TSoftObjectPtr<USceneBufferAsset> SceneBufferAsset;
-	FTransform TransformInCamera;
+
+	FTransform CameraTransform;
+	FTransform ActorTransform;
 
 	void LoadSceneBufferAsset(const FSoftObjectPath& SceneBufferAssetPath)
 	{
@@ -112,7 +112,7 @@ public:
 		SystemInstancesToInstanceData_RT.Remove(InstanceID);
 	}
 
-	void PostSRV(const FNiagaraSystemInstanceID& InstanceID)
+	void PostSRV_RT(const FNiagaraSystemInstanceID& InstanceID)
 	{
 		const FNDIGaussianInstanceData& InstanceData = GetInstanceData_RT(InstanceID);
 		const USceneBufferAsset& SceneBufferAsset = InstanceData.GetSceneBufferAsset();
@@ -120,68 +120,82 @@ public:
 		ENQUEUE_RENDER_COMMAND(FUpdateGaussianBuffer)(
 			[this, &SceneBufferAsset](FRHICommandListImmediate& RHICmdList)
 			{
-				{
-					const size_t BufferSize = SceneBufferAsset.GaussianCount * sizeof(FVector4f);
-
-					// 初始化 Buffer
-					if (BufferSize > 0 && !GaussianPositionBuffer.NumBytes)
+				InitializeBuffer<FVector4f>(
+					GaussianPositionOpacityBuffer, TEXT("PositionOpacityBuffer"),
+					SceneBufferAsset.GaussianCount,
+					PF_A32B32G32R32F, RHICmdList,
+					[&SceneBufferAsset](const size_t Index, FVector4f& MappedData)
 					{
-						GaussianPositionBuffer.Initialize(RHICmdList, TEXT("PositionBuffer"),
-						                                  sizeof(FVector4f),
-						                                  SceneBufferAsset.GaussianCount, PF_A32B32G32R32F,
-						                                  BUF_Static);
-					}
+						const FVector& Position = SceneBufferAsset.GaussianPositions[Index];
+						MappedData.X = Position.X;
+						MappedData.Y = Position.Y;
+						MappedData.Z = Position.Z;
+						MappedData.W = SceneBufferAsset.GaussianOpacities[Index];
+					});
 
-					// 如果初始化成功，更新数据到 Buffer
-					if (GaussianPositionBuffer.NumBytes > 0)
+				InitializeBuffer<FVector4f>(
+					GaussianSHCoefficientsBuffer, TEXT("SHCoefficientsBuffer"),
+					SceneBufferAsset.GaussianCount * SceneBufferAsset.SHCoefficientsCount,
+					PF_A32B32G32R32F, RHICmdList,
+					[&SceneBufferAsset](const size_t Index, FVector4f& MappedData)
 					{
-						// 上锁，准备写入数据
-						float* MappedData = static_cast<float*>(
-							RHICmdList.LockBuffer(GaussianPositionBuffer.Buffer, 0, BufferSize, RLM_WriteOnly));
-						// 先将 Vector3 转换成 Vector4，再复制到 GPU Buffer
-						for (size_t i = 0; i < SceneBufferAsset.GaussianCount; ++i)
-						{
-							const FVector& Position = SceneBufferAsset.GaussianPositions[i];
-							MappedData[i * 4 + 0] = Position.X;
-							MappedData[i * 4 + 1] = Position.Y;
-							MappedData[i * 4 + 2] = Position.Z;
-							MappedData[i * 4 + 3] = 1.0f; // padding
-						}
-						RHICmdList.UnlockBuffer(GaussianPositionBuffer.Buffer);
-					}
-				}
-				{
-					const size_t TotalSHCoefficientsCount = SceneBufferAsset.GaussianCount * SceneBufferAsset.
-						SHCoefficientsCount;
+						const FVector& Position = SceneBufferAsset.GaussianSHCoefficients[Index];
+						MappedData.X = Position.X;
+						MappedData.Y = Position.Y;
+						MappedData.Z = Position.Z;
+						MappedData.W = 1.0f; // padding
+					});
 
-					const size_t BufferSize = TotalSHCoefficientsCount * sizeof(FVector4f);
-
-					if (BufferSize > 0 && !GaussianSHCoefficientsBuffer.NumBytes)
+				InitializeBuffer<FQuat4f>(
+					GaussianRotationBuffer, TEXT("RotationBuffer"),
+					SceneBufferAsset.GaussianCount,
+					PF_A32B32G32R32F, RHICmdList,
+					[&SceneBufferAsset](const size_t Index, FQuat4f& MappedData)
 					{
-						GaussianSHCoefficientsBuffer.Initialize(RHICmdList, TEXT("SHCoefficientsBuffer"),
-						                                        sizeof(FVector4f),
-						                                        TotalSHCoefficientsCount, PF_A32B32G32R32F,
-						                                        BUF_Static);
-					}
+						MappedData = FQuat4f(SceneBufferAsset.GaussianRotations[Index]);
+					});
 
-					if (GaussianSHCoefficientsBuffer.NumBytes > 0)
+				InitializeBuffer<FVector4f>(
+					GaussianScaleBuffer, TEXT("ScaleBuffer"),
+					SceneBufferAsset.GaussianCount,
+					PF_A32B32G32R32F, RHICmdList,
+					[&SceneBufferAsset](const size_t Index, FVector4f& MappedData)
 					{
-						// 上锁，准备写入数据
-						float* MappedData = static_cast<float*>(
-							RHICmdList.LockBuffer(GaussianSHCoefficientsBuffer.Buffer, 0, BufferSize,
-							                      RLM_WriteOnly));
-						for (size_t i = 0; i < TotalSHCoefficientsCount; ++i)
-						{
-							const FVector& SH = SceneBufferAsset.GaussianSHCoefficients[i];
-							MappedData[i * 4 + 0] = SH.X;
-							MappedData[i * 4 + 1] = SH.Y;
-							MappedData[i * 4 + 2] = SH.Z;
-							MappedData[i * 4 + 3] = 1.0f; // padding
-						}
-						RHICmdList.UnlockBuffer(GaussianSHCoefficientsBuffer.Buffer);
-					}
-				}
+						const FVector& Scale = SceneBufferAsset.GaussianScales[Index];
+						MappedData.X = Scale.X;
+						MappedData.Y = Scale.Y;
+						MappedData.Z = Scale.Z;
+						MappedData.W = 1.0f;
+					});
 			});
+	}
+
+private:
+	template <typename TBufferElementType>
+	static void InitializeBuffer(FReadBuffer& Buffer,
+	                             const TCHAR* BufferName,
+	                             const size_t BufferElementCount,
+	                             const EPixelFormat BufferFormat,
+	                             FRHICommandListImmediate& RHICmdList,
+	                             TFunction<void(size_t Index, TBufferElementType& MappedData)> FillFunction)
+	{
+		const size_t BufferSize = BufferElementCount * sizeof(TBufferElementType);
+		if (BufferSize > 0 && !Buffer.NumBytes)
+		{
+			Buffer.Initialize(RHICmdList, BufferName, sizeof(TBufferElementType), BufferElementCount, BufferFormat,
+			                  BUF_Static);
+		}
+
+		if (Buffer.NumBytes > 0)
+		{
+			TBufferElementType* MappedData = static_cast<TBufferElementType*>(
+				RHICmdList.LockBuffer(Buffer.Buffer, 0, BufferSize, RLM_WriteOnly));
+			for (size_t i = 0; i < BufferElementCount; ++i)
+			{
+				FillFunction(i, MappedData[i]);
+			}
+			RHICmdList.UnlockBuffer(Buffer.Buffer);
+		}
 	}
 
 private:
@@ -191,18 +205,20 @@ private:
 
 public:
 	// =============================== Buffer ===============================
-	FReadBuffer GaussianPositionBuffer;
+	FReadBuffer GaussianPositionOpacityBuffer;
 	FReadBuffer GaussianSHCoefficientsBuffer;
+	FReadBuffer GaussianRotationBuffer;
+	FReadBuffer GaussianScaleBuffer;
 };
 
-USceneNiagaraInterface::USceneNiagaraInterface(const FObjectInitializer& ObjectInitializer)
+USceneNiagaraDataInterface::USceneNiagaraDataInterface(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	Proxy.Reset(new FNDIGaussianProxy());
 }
 
 #if WITH_EDITORONLY_DATA
-void USceneNiagaraInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const
+void USceneNiagaraDataInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const
 {
 	// 获取高斯数量
 	{
@@ -244,7 +260,7 @@ void USceneNiagaraInterface::GetFunctionsInternal(TArray<FNiagaraFunctionSignatu
 }
 #endif
 
-void USceneNiagaraInterface::PostInitProperties()
+void USceneNiagaraDataInterface::PostInitProperties()
 {
 	Super::PostInitProperties();
 
@@ -268,42 +284,42 @@ void USceneNiagaraInterface::PostInitProperties()
 	}
 }
 
-void USceneNiagaraInterface::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+void USceneNiagaraDataInterface::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 }
 
-bool USceneNiagaraInterface::CanExecuteOnTarget(ENiagaraSimTarget Target) const
+bool USceneNiagaraDataInterface::CanExecuteOnTarget(ENiagaraSimTarget Target) const
 {
 	// CPU 和 GPU 都支持
 	return true;
 }
 
-bool USceneNiagaraInterface::CopyToInternal(UNiagaraDataInterface* Destination) const
+bool USceneNiagaraDataInterface::CopyToInternal(UNiagaraDataInterface* Destination) const
 {
 	if (!Super::CopyToInternal(Destination))
 	{
 		return false;
 	}
 
-	if (USceneNiagaraInterface* Other = Cast<USceneNiagaraInterface>(Destination))
+	if (USceneNiagaraDataInterface* Other = Cast<USceneNiagaraDataInterface>(Destination))
 	{
 		Other->UserParameterBinding = UserParameterBinding;
 	}
 	return true;
 }
 
-bool USceneNiagaraInterface::Equals(const UNiagaraDataInterface* Other) const
+bool USceneNiagaraDataInterface::Equals(const UNiagaraDataInterface* Other) const
 {
 	if (!Super::Equals(Other))
 	{
 		return false;
 	}
 
-	return UserParameterBinding == CastChecked<USceneNiagaraInterface>(Other)->UserParameterBinding;
+	return UserParameterBinding == CastChecked<USceneNiagaraDataInterface>(Other)->UserParameterBinding;
 }
 
-bool USceneNiagaraInterface::AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const
+bool USceneNiagaraDataInterface::AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const
 {
 	if (!Super::AppendCompileHash(InVisitor))
 	{
@@ -315,15 +331,15 @@ bool USceneNiagaraInterface::AppendCompileHash(FNiagaraCompileHashVisitor* InVis
 	return true;
 }
 
-bool USceneNiagaraInterface::GetFunctionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
-                                             const FNiagaraDataInterfaceGeneratedFunction& FunctionInfo,
-                                             int FunctionInstanceIndex, FString& OutHLSL)
+bool USceneNiagaraDataInterface::GetFunctionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
+                                                 const FNiagaraDataInterfaceGeneratedFunction& FunctionInfo,
+                                                 int FunctionInstanceIndex, FString& OutHLSL)
 {
 	return FunctionInfo.DefinitionName == GetGaussianDataName;
 }
 
-void USceneNiagaraInterface::GetParameterDefinitionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
-                                                        FString& OutHLSL)
+void USceneNiagaraDataInterface::GetParameterDefinitionHLSL(const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
+                                                            FString& OutHLSL)
 {
 	const TMap<FString, FStringFormatArg> TemplateArgs = {
 		{TEXT("ParameterName"), ParamInfo.DataInterfaceHLSLSymbol},
@@ -332,12 +348,13 @@ void USceneNiagaraInterface::GetParameterDefinitionHLSL(const FNiagaraDataInterf
 	AppendTemplateHLSL(OutHLSL, *GaussianShaderFile, TemplateArgs);
 }
 
-void USceneNiagaraInterface::BuildShaderParameters(FNiagaraShaderParametersBuilder& ShaderParametersBuilder) const
+void USceneNiagaraDataInterface::BuildShaderParameters(FNiagaraShaderParametersBuilder& ShaderParametersBuilder) const
 {
 	ShaderParametersBuilder.AddNestedStruct<FShaderParameters>();
 }
 
-void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetShaderParametersContext& Context) const
+void USceneNiagaraDataInterface::SetShaderParameters(
+	const FNiagaraDataInterfaceSetShaderParametersContext& Context) const
 {
 	FNDIGaussianProxy& DataInterfaceProxy = Context.GetProxy<FNDIGaussianProxy>();
 	const FNDIGaussianInstanceData& InstanceData = DataInterfaceProxy.GetInstanceData_RT(Context.GetSystemInstanceID());
@@ -347,33 +364,31 @@ void USceneNiagaraInterface::SetShaderParameters(const FNiagaraDataInterfaceSetS
 	// 将 SceneBufferAsset 的数据上传到 GPU Buffer
 	if (InstanceData.SceneBufferAsset.IsValid())
 	{
-		DataInterfaceProxy.PostSRV(Context.GetSystemInstanceID());
+		DataInterfaceProxy.PostSRV_RT(Context.GetSystemInstanceID());
 	}
 	ShaderParameters->GaussianCount = InstanceData.GetGaussianCount();
 	ShaderParameters->SHCoefficientsCount = InstanceData.GetSHCoefficientsCount();
-	ShaderParameters->GaussianPositionBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
-		DataInterfaceProxy.GaussianPositionBuffer.SRV);
+	ShaderParameters->GaussianPositionOpacityBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
+		DataInterfaceProxy.GaussianPositionOpacityBuffer.SRV);
+	ShaderParameters->GaussianRotationBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
+		DataInterfaceProxy.GaussianRotationBuffer.SRV);
 	ShaderParameters->GaussianSHCoefficientsBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
 		DataInterfaceProxy.GaussianSHCoefficientsBuffer.SRV);
+	ShaderParameters->GaussianScaleBuffer = FNiagaraRenderer::GetSrvOrDefaultFloat(
+		DataInterfaceProxy.GaussianScaleBuffer.SRV);
 
-	// 把当前 Actor 相对于相机的位置、旋转传递给 GPU
-	ShaderParameters->ActorTransformMatrixInCamera = FMatrix44f(
-		InstanceData.TransformInCamera.ToMatrixWithScale());
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("USceneNiagaraInterface::SetShaderParameters - Set Shader Parameters: ActorTransformMatrixInCamera=%s, GaussianCount=%d, SHCoefficientsCount=%d"
-	       ),
-	       *ShaderParameters->ActorTransformMatrixInCamera.ToString(),
-	       ShaderParameters->GaussianCount,
-	       ShaderParameters->SHCoefficientsCount);
+	ShaderParameters->ActorTransformMatrix = FMatrix44f(
+		InstanceData.ActorTransform.ToMatrixWithScale());
+	const FVector4 CameraPosition = InstanceData.CameraTransform.GetLocation();
+	ShaderParameters->CameraPosition = FVector4f(CameraPosition);
 }
 
-int USceneNiagaraInterface::PerInstanceDataSize() const
+int USceneNiagaraDataInterface::PerInstanceDataSize() const
 {
 	return sizeof(FNDIGaussianInstanceData);
 }
 
-bool USceneNiagaraInterface::InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
+bool USceneNiagaraDataInterface::InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
 {
 	FNDIGaussianInstanceData* InstanceData = new(PerInstanceData) FNDIGaussianInstanceData();
 
@@ -397,8 +412,8 @@ bool USceneNiagaraInterface::InitPerInstanceData(void* PerInstanceData, FNiagara
 	return true;
 }
 
-bool USceneNiagaraInterface::PerInstanceTick(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance,
-                                             const float DeltaSeconds)
+bool USceneNiagaraDataInterface::PerInstanceTick(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance,
+                                                 const float DeltaSeconds)
 {
 	check(SystemInstance);
 	FNDIGaussianInstanceData* InstanceData = static_cast<FNDIGaussianInstanceData*>(PerInstanceData);
@@ -409,17 +424,18 @@ bool USceneNiagaraInterface::PerInstanceTick(void* PerInstanceData, FNiagaraSyst
 	}
 
 	// 得到当前 System 对象相对于相机的 Transform
-	InstanceData->TransformInCamera = GetActorTransformInCamera(SystemInstance);
+	InstanceData->CameraTransform = GetCameraTransform(SystemInstance);
+	InstanceData->ActorTransform = GetActorTransform(SystemInstance);
 	return false;
 }
 
-void USceneNiagaraInterface::ProvidePerInstanceDataForRenderThread(void* DataForRenderThread, void* PerInstanceData,
-                                                                   const FNiagaraSystemInstanceID& SystemInstance)
+void USceneNiagaraDataInterface::ProvidePerInstanceDataForRenderThread(void* DataForRenderThread, void* PerInstanceData,
+                                                                       const FNiagaraSystemInstanceID& SystemInstance)
 {
 	FNDIGaussianProxy::ProvidePerInstanceDataForRenderThread(DataForRenderThread, PerInstanceData, SystemInstance);
 }
 
-void USceneNiagaraInterface::DestroyPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
+void USceneNiagaraDataInterface::DestroyPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance)
 {
 	FNDIGaussianInstanceData* InstanceData = static_cast<FNDIGaussianInstanceData*>(PerInstanceData);
 	InstanceData->~FNDIGaussianInstanceData();
@@ -434,13 +450,13 @@ void USceneNiagaraInterface::DestroyPerInstanceData(void* PerInstanceData, FNiag
 	);
 }
 
-bool USceneNiagaraInterface::HasPreSimulateTick() const
+bool USceneNiagaraDataInterface::HasPreSimulateTick() const
 {
 	return true;
 }
 
-void USceneNiagaraInterface::GetVMExternalFunction(const FVMExternalFunctionBindingInfo& BindingInfo,
-                                                   void* InstanceData, FVMExternalFunction& OutFunc)
+void USceneNiagaraDataInterface::GetVMExternalFunction(const FVMExternalFunctionBindingInfo& BindingInfo,
+                                                       void* InstanceData, FVMExternalFunction& OutFunc)
 {
 	if (BindingInfo.Name == GetGaussianCountName)
 	{
@@ -455,7 +471,7 @@ void USceneNiagaraInterface::GetVMExternalFunction(const FVMExternalFunctionBind
 	       *BindingInfo.Name.ToString());
 }
 
-void USceneNiagaraInterface::GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const
+void USceneNiagaraDataInterface::GetGaussianCountVM(FVectorVMExternalFunctionContext& Context) const
 {
 	VectorVM::FUserPtrHandler<FNDIGaussianInstanceData> InstanceData(Context);
 	FNDIOutputParam<int> OutCount(Context);
@@ -467,7 +483,7 @@ void USceneNiagaraInterface::GetGaussianCountVM(FVectorVMExternalFunctionContext
 	}
 }
 
-FTransform USceneNiagaraInterface::GetCameraTransform(FNiagaraSystemInstance* SystemInstance) const
+FTransform USceneNiagaraDataInterface::GetCameraTransform(FNiagaraSystemInstance* SystemInstance) const
 {
 	const UWorld* World = SystemInstance->GetWorld();
 	if (!World)
@@ -499,10 +515,6 @@ FTransform USceneNiagaraInterface::GetCameraTransform(FNiagaraSystemInstance* Sy
 		{
 			if (LevelVC && LevelVC->IsPerspective())
 			{
-				UE_LOG(LogTemp, Log,
-				       TEXT(
-					       "USceneNiagaraInterface::GetCameraTransform - Found LevelEditorViewportClient"
-				       ));
 				const FVector CameraLocation = LevelVC->GetViewLocation();
 				const FRotator CameraRotation = LevelVC->GetViewRotation();
 
@@ -514,13 +526,12 @@ FTransform USceneNiagaraInterface::GetCameraTransform(FNiagaraSystemInstance* Sy
 	return FTransform::Identity;
 }
 
-FTransform USceneNiagaraInterface::GetActorTransformInCamera(FNiagaraSystemInstance* SystemInstance) const
+FTransform USceneNiagaraDataInterface::GetActorTransform(FNiagaraSystemInstance* SystemInstance) const
 {
-	const FTransform CameraTransform = GetCameraTransform(SystemInstance);
 	const AActor* Owner = SystemInstance->GetAttachComponent()->GetOwner();
 	if (Owner)
 	{
-		return Owner->GetActorTransform().GetRelativeTransform(CameraTransform);
+		return Owner->GetActorTransform();
 	}
 	return FTransform::Identity;
 }

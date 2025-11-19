@@ -5,12 +5,12 @@
 
 #include "NiagaraDataInterface.h"
 
-#include "SceneNiagaraInterface.generated.h"
+#include "SceneNiagaraDataInterface.generated.h"
 
 /// 在 Niagara 中，不能直接使用 USceneBufferAsset 资源，需要通过 UNiagaraDataInterface 来桥接
 /// 它会暴露一些函数，把数据从 CPU 传递到 GPU 上的 Niagara 系统中
 UCLASS()
-class GAUSSIANSPLATTINGXRUNTIME_API USceneNiagaraInterface : public UNiagaraDataInterface
+class GAUSSIANSPLATTINGXRUNTIME_API USceneNiagaraDataInterface : public UNiagaraDataInterface
 {
 	GENERATED_BODY()
 
@@ -18,15 +18,18 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Scene")
 	FNiagaraUserParameterBinding UserParameterBinding;
 
-	explicit USceneNiagaraInterface(const FObjectInitializer& ObjectInitializer);
+	explicit USceneNiagaraDataInterface(const FObjectInitializer& ObjectInitializer);
 
 private:
 	// =============================== 暴露给 HLSL（GPU）的数据结构 ===============================
 	BEGIN_SHADER_PARAMETER_STRUCT(FShaderParameters,)
 		SHADER_PARAMETER(int, GaussianCount)
 		SHADER_PARAMETER(int, SHCoefficientsCount)
-		SHADER_PARAMETER(FMatrix44f, ActorTransformMatrixInCamera)
-		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianPositionBuffer)
+		SHADER_PARAMETER(FMatrix44f, ActorTransformMatrix)
+		SHADER_PARAMETER(FVector4f, CameraPosition)
+		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianPositionOpacityBuffer)
+		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianScaleBuffer)
+		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianRotationBuffer)
 		SHADER_PARAMETER_SRV(Buffer<FVector4f>, GaussianSHCoefficientsBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -91,7 +94,7 @@ private:
 
 	// ============================== 辅助函数 ===============================
 	FTransform GetCameraTransform(FNiagaraSystemInstance* SystemInstance) const;
-	FTransform GetActorTransformInCamera(FNiagaraSystemInstance* SystemInstance) const;
+	FTransform GetActorTransform(FNiagaraSystemInstance* SystemInstance) const;
 
 private:
 	static const FName GetGaussianCountName;
