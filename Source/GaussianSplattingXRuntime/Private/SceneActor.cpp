@@ -22,6 +22,7 @@ void ASceneActor::OnConstruction(const FTransform& Transform)
 	}
 }
 
+#if WITH_EDITOR
 void ASceneActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
@@ -32,3 +33,4 @@ void ASceneActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedE
 
 	NiagaraComp->SetVariableObject(TEXT("User.SceneNiagaraParameter"), SceneNiagaraParameter.Get());
 }
+#endif

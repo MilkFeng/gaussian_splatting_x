@@ -7,9 +7,7 @@
 
 #include "SceneNiagaraDataInterface.generated.h"
 
-/// 在 Niagara 中，不能直接使用 USceneBufferAsset 资源，需要通过 UNiagaraDataInterface 来桥接
-/// 它会暴露一些函数，把数据从 CPU 传递到 GPU 上的 Niagara 系统中
-UCLASS()
+UCLASS(meta = (DisplayName = "Gaussian Splatting Niagara Data Interface"))
 class GAUSSIANSPLATTINGXRUNTIME_API USceneNiagaraDataInterface : public UNiagaraDataInterface
 {
 	GENERATED_BODY()

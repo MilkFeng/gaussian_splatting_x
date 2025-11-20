@@ -7,8 +7,7 @@ public class GaussianSplattingXRuntime : ModuleRules
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDependencyModuleNames.AddRange(
-			new string[]
-			{
+			[
 				"Core",
 				"Niagara",
 				"NiagaraCore",
@@ -16,20 +15,22 @@ public class GaussianSplattingXRuntime : ModuleRules
 				"RenderCore",
 				"Projects",
 				"RHI"
-			}
+			]
 		);
 
 		PrivateDependencyModuleNames.AddRange(
-			new string[]
-			{
+			[
 				"CoreUObject",
-				"Engine",
-			}
+				"Engine"
+			]
 		);
 
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.Add("UnrealEd");
+			PrivateDependencyModuleNames.AddRange([
+				"UnrealEd",
+				"NiagaraEditor"
+			]);
 		}
 	}
 }

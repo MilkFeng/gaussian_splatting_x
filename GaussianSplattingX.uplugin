@@ -22,13 +22,19 @@
     },
     {
       "Name": "GaussianSplattingXImporter",
-      "Type": "Developer",
+      "Type": "Editor",
       "LoadingPhase": "Default"
     },
     {
       "Name": "GaussianSplattingXRuntime",
       "Type": "Runtime",
       "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "Niagara",
+      "Enabled": true
     }
   ]
 }

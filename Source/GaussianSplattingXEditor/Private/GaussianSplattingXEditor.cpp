@@ -7,7 +7,6 @@
 #include "IDesktopPlatform.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Text/STextBlock.h"
 #include "ToolMenus.h"
 #include "GaussianSplattingXImporter/Public/SceneManager.h"
 

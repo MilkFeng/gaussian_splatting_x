@@ -1,6 +1,9 @@
 ﻿#include "SceneNiagaraDataInterface.h"
 
+#if WITH_EDITOR
 #include "LevelEditorViewport.h"
+#endif
+
 #include "SceneActor.h"
 
 #include "NiagaraCompileHashVisitor.h"
@@ -269,10 +272,12 @@ void USceneNiagaraDataInterface::PostInitProperties()
 	}
 }
 
+#if WITH_EDITOR
 void USceneNiagaraDataInterface::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 }
+#endif
 
 bool USceneNiagaraDataInterface::CanExecuteOnTarget(ENiagaraSimTarget Target) const
 {
@@ -304,6 +309,7 @@ bool USceneNiagaraDataInterface::Equals(const UNiagaraDataInterface* Other) cons
 	return UserParameterBinding == CastChecked<USceneNiagaraDataInterface>(Other)->UserParameterBinding;
 }
 
+#if WITH_EDITORONLY_DATA
 bool USceneNiagaraDataInterface::AppendCompileHash(FNiagaraCompileHashVisitor* InVisitor) const
 {
 	if (!Super::AppendCompileHash(InVisitor))
@@ -332,6 +338,7 @@ void USceneNiagaraDataInterface::GetParameterDefinitionHLSL(const FNiagaraDataIn
 	};
 	AppendTemplateHLSL(OutHLSL, *GaussianShaderFile, TemplateArgs);
 }
+#endif
 
 void USceneNiagaraDataInterface::BuildShaderParameters(FNiagaraShaderParametersBuilder& ShaderParametersBuilder) const
 {
@@ -492,6 +499,7 @@ FTransform USceneNiagaraDataInterface::GetCameraTransform(const FNiagaraSystemIn
 			return FTransform(CameraRotation, CameraLocation);
 		}
 	}
+#if WITH_EDITOR
 	else
 	{
 		for (const auto LevelVC : GEditor->GetLevelViewportClients())
@@ -505,6 +513,7 @@ FTransform USceneNiagaraDataInterface::GetCameraTransform(const FNiagaraSystemIn
 			}
 		}
 	}
+#endif
 
 	return FTransform::Identity;
 }

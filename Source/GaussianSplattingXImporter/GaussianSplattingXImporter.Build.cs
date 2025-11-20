@@ -8,22 +8,19 @@ public class GaussianSplattingXImporter : ModuleRules
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDependencyModuleNames.AddRange(
-			new string[]
-			{
+			[
 				"Core",
-				"GaussianSplattingXRuntime",
-				
-			}
+				"GaussianSplattingXRuntime"
+			]
 		);
 
 		PrivateDependencyModuleNames.AddRange(
-			new string[]
-			{
+			[
 				"CoreUObject",
 				"Engine",
 				"UnrealEd",
-				"Kismet",
-			}
+				"Kismet"
+			]
 		);
 
 		string ThirdPartyPath = Path.Combine(ModuleDirectory, "../../ThirdParty/TinyPLY");
